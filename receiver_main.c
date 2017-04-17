@@ -71,3 +71,11 @@ int main(int argc, char** argv) {
 
 	// reliablyReceive(udpPort, argv[2]);
 }
+
+/**
+receive message
+get the sequence number
+if seq_num==expected: increment expected and write to file
+else: throw away
+send ack + seq_num
+**/

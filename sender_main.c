@@ -72,3 +72,28 @@ int main(int argc, char** argv)
 
 	// sendMessage(0, "msg", 2);
 }
+
+
+/**
+receive_thread
+while True:
+	listen for message from receiver
+	LAR = ack_val
+	broadcast to wake up conditional variable
+
+send_thread
+while seq_num < LAR + SWS && bytesToTransfer > 0: <-- mod this
+	if bytesToTransfer > 1471:
+		read in 1471 bytes for message
+		bytesToTransfer -= 1471
+	else
+		read in bytesToTransfer
+	add seq_num to start of message
+	increment seq_num
+	send
+
+wait_thread:
+conditionally wait 100ms
+	restart send_thread
+if woken up, restart conditionally wait
+**/
