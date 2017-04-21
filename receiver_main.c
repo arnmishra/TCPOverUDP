@@ -17,6 +17,7 @@
 // }
 
 void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
+	//
 }
 
 int main(int argc, char** argv) {
@@ -31,7 +32,6 @@ int main(int argc, char** argv) {
 	unsigned short int udpPort;
 	udpPort = (unsigned short int)atoi(argv[1]);
 
-
 	// LOl fucking shit bruh
 
 	int s;
@@ -42,7 +42,7 @@ int main(int argc, char** argv) {
     hints.ai_socktype =  SOCK_DGRAM;
     hints.ai_flags =  AI_PASSIVE;
 
-    getaddrinfo(NULL, "7777", &hints, &result);
+    getaddrinfo(NULL, argv[1], &hints, &result);
 
     int sockfd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 
@@ -53,23 +53,16 @@ int main(int argc, char** argv) {
     struct sockaddr_storage addr;
     int addrlen = sizeof(addr);
 
-    while(1){
-        char buf[1024];
-        printf("Waiting to recv...\n");
-        ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
-        buf[byte_count] = '\0';
+    char buf[1024];
+    ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
+    buf[byte_count] = '\0';
 
-        printf("Read %d chars\n", byte_count);
-        printf("===\n");
-        printf("%s\n", buf);
+    printf("Received message: %s\n", buf);
 
-        // printf("\n\nTrying to send message back?\n");
+    char *buffer = "Hey hey\n";
+    sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
 
-        // char *buffer = "COME BACK NIGGA\n";
-        // sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, &addrlen);
-    }
-
-	// reliablyReceive(udpPort, argv[2]);
+	reliablyReceive(udpPort, argv[2]);
 }
 
 /**
