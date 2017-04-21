@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -20,9 +21,9 @@
 
 int sockfd;
 
-unsigned char LAR = 0;		// Last acknowledged frame
-unsigned char LFS = 0;		// Last frame sent
-unsigned char seq_num;		// Sequence number
+char LAR = -1;	// Last acknowledged frame
+char LFS = 0;	// Last frame sent
+char seq_num;	// Sequence number
 
 // Synchronization
 pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
@@ -31,9 +32,11 @@ pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 // NOT USED YET
 // Store the last packets sent in the window (if resend needed)
 typedef struct packet {
-	int seq_num;
+	int packet_id;
+	char seq_num;
 	char data[MAX_DATA_SIZE];
 	time_t send_time;
+	bool active;
 	struct packet *next;
 } packet_t;
 packet_t *head;
@@ -50,7 +53,7 @@ typedef struct thread {
 	int id;
 } thread_t;
 
-void signalHandler(int val) {
+void SIGINT_handler(int val) {
 	printf("Closing...\n");
 
 	close(sockfd);
@@ -68,6 +71,40 @@ void signalHandler(int val) {
     exit(1);
 }
 
+void checkForTimeouts(int val) {
+	printf("Checking for timeouts...\n");
+	packet_t *packet = head;
+
+	time_t now = time(0);
+	while (packet != NULL) {
+		if (packet->active) {
+			double diff = difftime(now, packet->send_time) * 1000; // x1000 for ms
+			if (diff > 100) {
+				printf("Packet %u timed out! Resending all n buffers...\n", packet->packet_id);
+				pthread_cond_broadcast(&cv);
+				break;
+			}
+			else
+				break;
+		}
+	}
+}
+
+/*
+ * Given an ack number, mark the packet as inactive in the window list
+ */
+void markPacketAsInactive(int ack_num) {
+	packet_t *packet = head;
+
+	while (packet != NULL) {
+		if (packet->seq_num == ack_num) {
+			packet->active = false;
+			break;
+		}
+		packet = packet->next;
+	}
+}
+
 /*
  * Thread for receiving acknowledgements, wakes up the sleeping transfer thread
  */
@@ -81,25 +118,26 @@ void *receiveAcknowledgements(void *ptr) {
 	    ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, p->ai_addr, &p->ai_addrlen);
 	    buf[byte_count] = '\0';
 
-	    printf("ACK: %s\n", buf);
-	    LAR += 1;
+	    printf("%s\n", buf);
+	    char ack_num;
+	    memcpy(&ack_num, &buf[3], 1);
+	    ack_num -= 48;
+	    printf("Received ack #%d\n", ack_num);
 
-	    pthread_cond_signal(&cv);
+	    if (ack_num == LAR + 1) {
+	    	printf("Received valid packet!\n");
+	    	markPacketAsInactive(ack_num);
+
+	    	LAR += 1;
+	    	pthread_cond_signal(&cv);
+	    }
+	    else {
+	    	printf("Received random ack\n");
+	    }
+
 	}
-}
 
-/*
- * Thread for determining if a message has timed out, wakes up the sleeping transfer thread
- */
-// wait_thread:
-// conditionally wait 100ms
-// 	restart send_thread
-// if woken up, restart conditionally wait
-void *waitAndTimeout(void *ptr) {
-	thread_t *thread = ptr;
-	int id = thread->id;
-
-	printf("Timeout thread for SWS packet %d\n", id);
+	return NULL;
 }
 
 // while seq_num < LAR + SWS && bytesToTransfer > 0: <-- mod this
@@ -119,11 +157,12 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		exit(1);
 	}
 
+	int id = 0;
 	while (bytesToTransfer > 0) {
 		pthread_mutex_lock(&m);
 
 		packet_t *packet = head;
-		while (seq_num < (LAR + SWS) % MAX_SEQUENCE_NUM && bytesToTransfer > 0) {
+		while (seq_num <= (LAR + SWS) % MAX_SEQUENCE_NUM && bytesToTransfer > 0) {
 			char buf[MAX_PACKET_SIZE];
 			char *ptr = buf + 1;
 			size_t bytesRead;
@@ -139,24 +178,34 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			}
 
 			memcpy(buf, &seq_num, 1);
-			seq_num = (seq_num + 1) % MAX_SEQUENCE_NUM;
 
 			// Update the window linked list
+			packet->packet_id = id;
 			packet->seq_num = seq_num;
 			memcpy(packet->data, ptr, bytesRead);
 			packet->send_time = time(0);
+			packet->active = true;
 			packet = packet->next;
 
 			int numBytes;
-			// printf("Sending out a packet with seq_num %u\n", seq_num);
+			printf("Sending out a packet with seq_num %u\n", seq_num);
+			fflush(stdout);
 			if ((numBytes = sendto(sockfd, buf, bytesRead+1, 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		        perror("sendto");
 		        exit(1);
 		    }
+
+		    // ualarm(5000, 0);
+		    alarm(1);
+
+			seq_num = (seq_num + 1) % MAX_SEQUENCE_NUM;
+			id += 1;
 		}
 
 		// Conditional wait here until an ACK is received, or something timesOut
+		printf("rT: Sleeping...\n");
 		pthread_cond_wait(&cv, &m);
+		printf("rT: Woken up!...\n");
 		pthread_mutex_unlock(&m);
 	}
 
@@ -169,7 +218,8 @@ int main(int argc, char** argv)
 		fprintf(stderr, "usage: %s receiver_hostname receiver_port filename_to_xfer bytes_to_xfer\n\n", argv[0]);
 		exit(1);
 	}
-	signal(SIGINT, signalHandler);
+	signal(SIGINT, SIGINT_handler);
+	signal(SIGALRM, checkForTimeouts);
 
 	char *hostname = argv[1];
 	char *portNum  = argv[2];
@@ -229,12 +279,12 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 
-	// Create thread for waiting and timeouts
-	thread_t *tid = calloc(SWS, sizeof(thread_t));
-	for (i = 0; i < SWS; i++) {
-		tid[i].id = i;
-		pthread_create(&tid[i].pid, NULL, waitAndTimeout, &tid[i]);
-	}
+	// // Create thread for waiting and timeouts
+	// thread_t *tid = calloc(SWS, sizeof(thread_t));
+	// for (i = 0; i < SWS; i++) {
+	// 	tid[i].id = i;
+	// 	pthread_create(&tid[i].pid, NULL, waitAndTimeout, &tid[i]);
+	// }
 
 	reliablyTransfer(hostname, udpPort, filename, numBytes, p);
 
