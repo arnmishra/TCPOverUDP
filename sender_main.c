@@ -7,20 +7,34 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <netdb.h>
+#include <pthread.h>
 
 #include "common.h"
 
-#define MAX_PACKET_SIZE 1471
+#define MAX_PACKET_SIZE 1472
+#define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
 #define SWS 4
 #define MAX_SEQUENCE_NUM (2 * SWS)
 
 int sockfd;
 
-unsigned int LAR = 0;		// Last acknowledged frame
-unsigned int LFS = 0;		// Last frame sent
+unsigned char LAR = 0;		// Last acknowledged frame
+unsigned char LFS = 0;		// Last frame sent
 unsigned char seq_num;		// Sequence number
 
+// NOT USED YET
+// Store the last packets sent in the window (if resend needed)
+typedef struct packet {
+	int seq_num;
+	char data[1500];
+} packet;
+
+// Argument for the pthread function receiveAcknowledgements
+typedef struct acknowledgementThreadArg {
+	unsigned short int udpPort;
+	struct addrinfo *p;
+} acknowledgementThreadArg;
 
 void signalHandler(int val) {
 	printf("Closing...\n");
@@ -28,8 +42,22 @@ void signalHandler(int val) {
     exit(1);
 }
 
-void sendMessage(char *message, int length) {
+void *receiveAcknowledgements(void *ptr) {
+	acknowledgementThreadArg *arg = ptr;
+	unsigned short int udpPort = arg->udpPort;
+	struct addrinfo *p = arg->p;
 
+	while (1) {
+		char buf[10];
+	    ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, p->ai_addr, &p->ai_addrlen);
+	    buf[byte_count] = '\0';
+
+	    printf("ACK: %s\n", buf);
+	}
+}
+
+void *waitAndTimeout(void *ptr) {
+	printf("Waiting... and timing out...\n");
 }
 
 // while seq_num < LAR + SWS && bytesToTransfer > 0: <-- mod this
@@ -41,7 +69,7 @@ void sendMessage(char *message, int length) {
 // add seq_num to start of message
 // increment seq_num (w/ mod)
 // send
-void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* filename, unsigned long long int bytesToTransfer) {
+void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* filename, unsigned long long int bytesToTransfer, struct addrinfo *p) {
 	FILE *f = fopen(filename, "r");
 
 	if (f == NULL) {
@@ -49,24 +77,32 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		exit(1);
 	}
 
-	while (seq_num < (LAR + SWS) % MAX_SEQUENCE_NUM && bytesToTransfer > 0) {
-		// Sleep here until I need to send?
+	while (bytesToTransfer > 0) {
+		while (seq_num < (LAR + SWS) % MAX_SEQUENCE_NUM && bytesToTransfer > 0) {
+			char buf[MAX_PACKET_SIZE];
+			char *ptr = buf + 1;
+			if (bytesToTransfer > MAX_DATA_SIZE) {
+				size_t bytesRead = fread(ptr, MAX_DATA_SIZE, 1, f);
+				bytesToTransfer -= MAX_DATA_SIZE;
+				printf("bytesToTransfer now = %lld\n", bytesToTransfer);
+			}
+			else {
+				size_t bytesRead = fread(ptr, bytesToTransfer, 1, f);
+				bytesToTransfer = 0;
+			}
 
-		char buf[1500];
-		char *ptr = buf + 1;
-		if (bytesToTransfer > MAX_PACKET_SIZE) {
-			size_t bytesRead = fread(ptr, MAX_PACKET_SIZE, 1, f);
-			bytesToTransfer -= MAX_PACKET_SIZE;
+			memcpy(buf, &seq_num, 1);
+			seq_num = (seq_num + 1) % MAX_SEQUENCE_NUM;
+
+			int numBytes;
+			printf("Sending out a packet with seq_num %d\n", (int)seq_num);
+			if ((numBytes = sendto(sockfd, buf, sizeof(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
+		        perror("sendto");
+		        exit(1);
+		    }
 		}
-		else {
-			size_t bytesRead = fread(ptr, bytesToTransfer, 1, f);
-			bytesToTransfer = 0;
-		}
 
-		memcpy(buf, &seq_num, 1);
-		seq_num = (seq_num + 1) % MAX_SEQUENCE_NUM;
-
-		//
+		// Conditional wait here until an ACK is received, or something timesOut
 	}
 
 	fclose(f);
@@ -119,21 +155,32 @@ int main(int argc, char** argv)
         exit(1);
     }
 
-    char buf[10];
-    ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, p->ai_addr, &p->ai_addrlen);
-    buf[byte_count] = '\0';
-
-    printf("Received message: %s\n", buf);
-
-
     seq_num = 0;
 
     unsigned short int udpPort = (unsigned short int)atoi(portNum);
 	unsigned long long int numBytes = atoll(argv[4]);
 
-	reliablyTransfer(hostname, udpPort, filename, numBytes);
+	// Create thread for receiving ACKs
+	acknowledgementThreadArg arg = { .udpPort = udpPort, .p = p };
+	pthread_t ack_id;
+	if (pthread_create(&ack_id, NULL, receiveAcknowledgements, &arg) != 0) {
+		perror("pthread_create");
+		exit(1);
+	}
+
+	// Create thread for waiting and timeouts
+	pthread_t timeout_id;
+	if (pthread_create(&timeout_id, NULL, waitAndTimeout, NULL) != 0) {
+		perror("pthread_create");
+		exit(1);
+	}
+
+	reliablyTransfer(hostname, udpPort, filename, numBytes, p);
 
     freeaddrinfo(servinfo);
+
+    void *result;
+    pthread_join(ack_id, &result);
 }
 
 /**
