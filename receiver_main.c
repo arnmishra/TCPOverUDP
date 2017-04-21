@@ -10,14 +10,73 @@
 
 #include "common.h"
 
+#define RWS 4
+
+unsigned char seq_num;      // Sequence number
+unsigned char NFE = 0;       // Next frame Expected
+unsigned char LFA = 0;       // Last frame acceptable
+
+
 // void signalHandler(int val) {
 // 	printf("Closing...\n");
 // 	close(udpPort);
 //     exit(1);
 // }
 
-void reliablyReceive(unsigned short int myUDPport, char* destinationFile) {
-	//
+
+/**
+receive message
+get the sequence number
+if seq_num==expected: increment expected and write to file
+else: throw away
+send ack + seq_num
+**/
+
+void reliablyReceive(char * myUDPport, char* destinationFile) {
+    seq_num = malloc(1);
+    struct addrinfo hints, *result;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET; // INET for IPv4
+    hints.ai_socktype =  SOCK_DGRAM;
+    hints.ai_flags =  AI_PASSIVE; 
+
+    getaddrinfo(NULL, myUDPport, &hints, &result);
+
+	int sockfd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+
+    if (bind(sockfd, result->ai_addr, result->ai_addrlen) != 0) {
+        perror("bind()");
+        exit(1);
+    }
+    struct sockaddr_storage addr;
+    int addrlen = sizeof(addr);
+    char buf[1472];
+
+    FILE * output_file = fopen(destinationFile, "w+");
+
+    while(1)
+    {
+        ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
+
+        printf("Received message of length %zi: %s\n", byte_count, buf);
+
+        memcpy(&seq_num, &buf[0], 1);
+        seq_num -= 48; //ascii conversion
+
+        printf("Sequence number: %u\n", seq_num);
+
+        if(seq_num == NFE)
+        {
+            NFE++;
+            fwrite(buf+1, 1, sizeof(buf)-1, output_file); // Skip the sequence number and write the rest
+            fflush(output_file);
+        }
+
+        char *buffer = malloc(4);
+        sprintf(buffer, "ack%u", seq_num);
+        sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
+    }
+    
 }
 
 int main(int argc, char** argv) {
@@ -29,40 +88,10 @@ int main(int argc, char** argv) {
 
 	// signal(SIGINT, signalHandler);
 
-	unsigned short int udpPort;
-	udpPort = (unsigned short int)atoi(argv[1]);
+	// unsigned short int udpPort;
+	// udpPort = (unsigned short int)atoi(argv[1]);
 
-	// LOl fucking shit bruh
-
-	int s;
-
-    struct addrinfo hints, *result;
-    memset(&hints, 0, sizeof(hints));
-    hints.ai_family = AF_INET; // INET for IPv4
-    hints.ai_socktype =  SOCK_DGRAM;
-    hints.ai_flags =  AI_PASSIVE;
-
-    getaddrinfo(NULL, argv[1], &hints, &result);
-
-    int sockfd = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
-
-    if (bind(sockfd, result->ai_addr, result->ai_addrlen) != 0) {
-        perror("bind()");
-        exit(1);
-    }
-    struct sockaddr_storage addr;
-    int addrlen = sizeof(addr);
-
-    char buf[1024];
-    ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
-    buf[byte_count] = '\0';
-
-    printf("Received message: %s\n", buf);
-
-    char *buffer = "Hey hey\n";
-    sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
-
-	reliablyReceive(udpPort, argv[2]);
+	reliablyReceive(argv[1], argv[2]);
 }
 
 /**
