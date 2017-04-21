@@ -38,7 +38,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET; // INET for IPv4
     hints.ai_socktype =  SOCK_DGRAM;
-    hints.ai_flags =  AI_PASSIVE; 
+    hints.ai_flags =  AI_PASSIVE;
 
     getaddrinfo(NULL, myUDPport, &hints, &result);
 
@@ -61,14 +61,13 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         printf("Received message of length %zi: %s\n", byte_count, buf);
 
         memcpy(&seq_num, &buf[0], 1);
-        seq_num -= 48; //ascii conversion
 
         printf("Sequence number: %u\n", seq_num);
 
         if(seq_num == NFE)
         {
             NFE++;
-            fwrite(buf+1, 1, sizeof(buf)-1, output_file); // Skip the sequence number and write the rest
+            fwrite(buf+1, 1, byte_count-1, output_file); // Skip the sequence number and write the rest
             fflush(output_file);
         }
 
@@ -76,7 +75,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         sprintf(buffer, "ack%u", seq_num);
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
     }
-    
+
 }
 
 int main(int argc, char** argv) {
