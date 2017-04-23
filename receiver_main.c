@@ -169,6 +169,10 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
                 insert_data(buf+1, seq_num, byte_count-1);
             }
         }
+        else
+        {
+            acknowledge_num = NFE;
+        }
         char *buffer = malloc(4);
         sprintf(buffer, "ack%u", acknowledge_num);
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
