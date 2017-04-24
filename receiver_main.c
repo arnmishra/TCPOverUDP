@@ -8,8 +8,6 @@
 #include <signal.h>
 #include <netdb.h>
 
-#include "common.h"
-
 #define RWS 4
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
@@ -100,7 +98,7 @@ void write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* 
             num_nodes++;
             temp = temp->next;
         }
-        
+
     }
     char * batch_write = malloc(malloc_bytes);
     memcpy(batch_write, buf, byte_count);
@@ -129,7 +127,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET; // INET for IPv4
     hints.ai_socktype =  SOCK_DGRAM;
-    hints.ai_flags =  AI_PASSIVE; 
+    hints.ai_flags =  AI_PASSIVE;
 
     getaddrinfo(NULL, myUDPport, &hints, &result);
 
@@ -173,7 +171,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         sprintf(buffer, "ack%u", acknowledge_num);
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
     }
-    
+
 }
 
 int main(int argc, char** argv) {

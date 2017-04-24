@@ -11,8 +11,6 @@
 #include <pthread.h>
 #include <time.h>
 
-#include "common.h"
-
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
@@ -118,21 +116,19 @@ void *receiveAcknowledgements(void *ptr) {
 	    ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, p->ai_addr, &p->ai_addrlen);
 	    buf[byte_count] = '\0';
 
-	    printf("%s\n", buf);
 	    char ack_num;
 	    memcpy(&ack_num, &buf[3], 1);
 	    ack_num -= 48;
-	    printf("Received ack #%d\n", ack_num);
 
 	    if (ack_num == LAR + 1) {
-	    	printf("Received valid packet!\n");
+	    	printf("Received valid packet (%s)\n", buf);
 	    	markPacketAsInactive(ack_num);
 
 	    	LAR += 1;
 	    	pthread_cond_signal(&cv);
 	    }
 	    else {
-	    	printf("Received random ack\n");
+	    	printf("Received random ack (%s)\n", buf);
 	    }
 
 	}
@@ -203,7 +199,6 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		}
 
 		// Conditional wait here until an ACK is received, or something timesOut
-		printf("rT: Sleeping...\n");
 		pthread_cond_wait(&cv, &m);
 		printf("rT: Woken up!...\n");
 		pthread_mutex_unlock(&m);
