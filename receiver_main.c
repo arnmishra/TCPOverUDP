@@ -9,6 +9,7 @@
 #include <netdb.h>
 
 #define RWS 4
+#define NUM_SEQ_NUM (2 * RWS)
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
@@ -146,18 +147,23 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     while(1)
     {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
-        printf("Received message of length %zi: %s\n", byte_count, buf+1);
+        // printf("Received message of length %zi: %s\n", byte_count, buf+1);
         memcpy(&seq_num, &buf[0], 1);
-        printf("Sequence number: %u\n", seq_num);
+        // printf("Sequence number: %u\n", seq_num);
+
+        if (buf[0] == 'F') {
+            // printf("RECEIVED AN F\n");
+            break;
+        }
 
         int acknowledge_num;
-        //printf("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA);
-        if(seq_num >= NFE && seq_num <= LFA)
+        // printf("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA);
+        if((seq_num >= NFE && seq_num <= LFA % NUM_SEQ_NUM) || (seq_num <= NFE && seq_num >= (LFA % NUM_SEQ_NUM)))
         {
             if(seq_num == NFE)
             {
-                NFE++;
-                LFA++;
+                NFE = (NFE + 1) % NUM_SEQ_NUM;
+                LFA = (LFA + 1) % NUM_SEQ_NUM;
                 acknowledge_num = seq_num;
                 write_data(buf+1, seq_num, byte_count-1, output_file);
             }
@@ -173,6 +179,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         }
         char *buffer = malloc(4);
         sprintf(buffer, "ack%u", acknowledge_num);
+        printf("Sending back: %s\n", buffer);
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
     }
 

@@ -15,7 +15,7 @@
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
 #define SWS 4
-#define MAX_SEQUENCE_NUM (2 * SWS)
+#define NUM_SEQ_NUM (2 * SWS)
 
 int sockfd;
 
@@ -85,6 +85,7 @@ void checkForTimeouts(int val) {
 			else
 				break;
 		}
+		packet = packet->next;
 	}
 }
 
@@ -120,12 +121,12 @@ void *receiveAcknowledgements(void *ptr) {
 	    memcpy(&ack_num, &buf[3], 1);
 	    ack_num -= 48;
 
-	    if (ack_num == LAR + 1) {
+	    if (ack_num == (LAR + 1) % NUM_SEQ_NUM) {
 	    	printf("Received valid packet (%s)\n", buf);
 	    	markPacketAsInactive(ack_num);
 
-	    	LAR += 1;
-	    	pthread_cond_signal(&cv);
+	    	LAR = (LAR + 1) % NUM_SEQ_NUM;
+	    	pthread_cond_broadcast(&cv);
 	    }
 	    else {
 	    	printf("Received random ack (%s)\n", buf);
@@ -158,7 +159,8 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		pthread_mutex_lock(&m);
 
 		packet_t *packet = head;
-		while (seq_num <= (LAR + SWS) % MAX_SEQUENCE_NUM && bytesToTransfer > 0) {
+		while (( (seq_num > LAR && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
+			// printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
 			char buf[MAX_PACKET_SIZE];
 			char *ptr = buf + 1;
 			size_t bytesRead;
@@ -184,23 +186,26 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			packet = packet->next;
 
 			int numBytes;
-			printf("Sending out a packet with seq_num %u\n", seq_num);
 			fflush(stdout);
+			// printf("Sending out packet (%d)\n", seq_num);
 			if ((numBytes = sendto(sockfd, buf, bytesRead+1, 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		        perror("sendto");
 		        exit(1);
 		    }
 
 		    // ualarm(5000, 0);
-		    alarm(1);
+		    // alarm(1);
 
-			seq_num = (seq_num + 1) % MAX_SEQUENCE_NUM;
+			seq_num = (seq_num + 1) % NUM_SEQ_NUM;
+
 			id += 1;
 		}
+		// printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
 
 		// Conditional wait here until an ACK is received, or something timesOut
+		// printf("rT: Sleeping with %lld to send...\n", bytesToTransfer);
 		pthread_cond_wait(&cv, &m);
-		printf("rT: Woken up!...\n");
+		// printf("rT: Woken up!...\n");
 		pthread_mutex_unlock(&m);
 	}
 
@@ -283,10 +288,14 @@ int main(int argc, char** argv)
 
 	reliablyTransfer(hostname, udpPort, filename, numBytes, p);
 
-    freeaddrinfo(servinfo);
+	// Done sending shit out, let the receiver know to stop
+	char *buf = "FIN";
+	if ((numbytes = sendto(sockfd, buf, strlen(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
+		perror("SEND :(\n");
+		exit(1);
+	}
 
-    void *result;
-    pthread_join(ack_id, &result);
+    freeaddrinfo(servinfo);
 }
 
 /**
