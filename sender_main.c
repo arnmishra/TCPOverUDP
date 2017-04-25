@@ -121,7 +121,7 @@ void *receiveAcknowledgements(void *ptr) {
 	    memcpy(&ack_num, &buf[3], 1);
 	    ack_num -= 48;
 
-	    if (ack_num >= (LAR + 1) % NUM_SEQ_NUM) {
+	    if (ack_num >= (LAR + 1) % NUM_SEQ_NUM || ack_num < LAR - 4) {
 	    	printf("Received valid packet (%s)\n", buf);
 	    	while (ack_num != (LAR + 1) % NUM_SEQ_NUM)
 	    	{
