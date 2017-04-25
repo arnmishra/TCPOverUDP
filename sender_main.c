@@ -121,10 +121,15 @@ void *receiveAcknowledgements(void *ptr) {
 	    memcpy(&ack_num, &buf[3], 1);
 	    ack_num -= 48;
 
-	    if (ack_num == (LAR + 1) % NUM_SEQ_NUM) {
+	    if (ack_num >= (LAR + 1) % NUM_SEQ_NUM) {
 	    	printf("Received valid packet (%s)\n", buf);
+	    	while (ack_num != (LAR + 1) % NUM_SEQ_NUM)
+	    	{
+	    		//printf("enter\n");
+	    		markPacketAsInactive(LAR + 1);
+	    		LAR = (LAR + 1) % NUM_SEQ_NUM;
+	    	}
 	    	markPacketAsInactive(ack_num);
-
 	    	LAR = (LAR + 1) % NUM_SEQ_NUM;
 	    	pthread_cond_broadcast(&cv);
 	    }
@@ -160,7 +165,7 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 
 		packet_t *packet = head;
 		while (( (seq_num > LAR && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
-			// printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
+			//printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
 			char buf[MAX_PACKET_SIZE];
 			char *ptr = buf + 1;
 			size_t bytesRead;
@@ -198,11 +203,31 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		    // ualarm(5000, 0);
 		    // alarm(1);
 
+		 //    if(seq_num == 0)
+		 //    {
+		 //    	seq_num = 3;
+		 //    }
+		 //    else if(seq_num == 3)
+		 //    {
+		 //    	seq_num = 1;
+		 //    }
+		 //    else if(seq_num == 1)
+		 //    {
+		 //    	seq_num = 2;
+		 //    }
+		 //    else if(seq_num == 2)
+		 //    {
+		 //    	seq_num = 4;
+		 //    }
+			// else
+			// {
 			seq_num = (seq_num + 1) % NUM_SEQ_NUM;
+			// }
 
 			id += 1;
+			//printf("bytes: %i\n", bytesToTransfer);
 		}
-		// printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
+		//printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
 
 		// Conditional wait here until an ACK is received, or something timesOut
 		// printf("rT: Sleeping with %lld to send...\n", bytesToTransfer);

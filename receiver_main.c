@@ -112,7 +112,7 @@ int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* o
         while(i < num_nodes)
         {
             memcpy(batch_write+num_bytes, head->data, strlen(head->data));
-            num_bytes += sizeof(head->data);
+            num_bytes += strlen(head->data);
             i++;
             data_t *next = head->next;
             free(head->data);
@@ -120,7 +120,7 @@ int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* o
             head = next;
         }
     }
-    //printf("Writing: %s\n", batch_write);
+    printf("Writing: %i\n", num_bytes);
     fwrite(batch_write, 1, num_bytes, output_file); // Skip the sequence number and write the rest
     fflush(output_file);
     return final_seq_num;
