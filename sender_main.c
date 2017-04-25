@@ -27,15 +27,20 @@ char seq_num;	// Sequence number
 pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 
+pthread_cond_t cv_timeout = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t m_timeout = PTHREAD_MUTEX_INITIALIZER;
+
+bool timeout_check = false;
+
 // NOT USED YET
 // Store the last packets sent in the window (if resend needed)
 typedef struct packet {
 	int packet_id;
 	char seq_num;
-	char data[MAX_DATA_SIZE];
+	char *data;
 	time_t send_time;
-	bool active;
 	struct packet *next;
+	struct packet *prev;
 } packet_t;
 packet_t *head;
 packet_t *tail;
@@ -69,39 +74,107 @@ void SIGINT_handler(int val) {
     exit(1);
 }
 
-void checkForTimeouts(int val) {
-	printf("Checking for timeouts...\n");
-	packet_t *packet = head;
+void awakenTimeoutThread(int val) {
+    printf("Checking for timeouts...\n");
+    pthread_mutex_lock(&m_timeout);
+    timeout_check = true;
+    pthread_cond_signal(&cv_timeout);
+    pthread_mutex_unlock(&m_timeout);
+}
 
-	time_t now = time(0);
-	while (packet != NULL) {
-		if (packet->active) {
-			double diff = difftime(now, packet->send_time) * 1000; // x1000 for ms
-			if (diff > 100) {
-				printf("Packet %u timed out! Resending all n buffers...\n", packet->packet_id);
-				pthread_cond_broadcast(&cv);
-				break;
-			}
-			else
-				break;
-		}
-		packet = packet->next;
-	}
+void *checkForTimeouts(void *arg) {
+    while (true) {
+        // Sleep until SIGALRM sets timeout_check flag
+        pthread_mutex_lock(&m_timeout);
+        while (!timeout_check) {
+            pthread_cond_wait(&cv_timeout, &m_timeout);
+        }
+
+        timeout_check = false;
+        pthread_mutex_unlock(&m_timeout);
+
+        // Iterate through all packets checking for timeouts
+        packet_t *packet = head;
+
+        time_t now = time(0);
+        while (packet != NULL) {
+            double diff = difftime(now, packet->send_time) * 1000; // x1000 for ms
+            if (diff > 100) {
+                printf("Packet %u timed out! Resending all n buffers...\n", packet->packet_id);
+                seq_num = packet->seq_num;
+                pthread_cond_signal(&cv);
+                break;
+            }
+            else
+                break;  // All packets after this one are newer anyway
+            packet = packet->next;
+        }
+    }
+
+}
+
+void insert_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count)
+{
+    packet_t *node = malloc(sizeof(packet_t));
+    node->seq_num = seq_num;
+    node->data = malloc(byte_count);
+    memcpy(node->data, buf, byte_count);
+    if(head)
+    {
+        int inserted = 0;
+        packet_t *temp = head;
+        while(temp)
+        {
+            if(node->seq_num < temp->seq_num) //insert node before temp
+            {
+                node->next = temp;
+                node->prev = temp->prev;
+                if(temp->prev)
+                {
+                    temp->prev->next = node;
+                }
+                temp->prev = node;
+                inserted = 1;
+            }
+        }
+        if(!inserted) //insert node at tail
+        {
+            tail->next = node;
+            node->prev = tail;
+            node->next = NULL;
+            tail = node;
+        }
+    }
+    else //if head isn't initialized, initialize it
+    {
+        head = node;
+        head->next = NULL;
+        head->prev = NULL;
+        tail = head;
+    }
 }
 
 /*
  * Given an ack number, mark the packet as inactive in the window list
  */
 void markPacketAsInactive(int ack_num) {
-	packet_t *packet = head;
+	packet_t *next = head->next;
 
-	while (packet != NULL) {
-		if (packet->seq_num == ack_num) {
-			packet->active = false;
-			break;
-		}
-		packet = packet->next;
+	while (ack_num != (LAR + 1) % NUM_SEQ_NUM)
+	{
+        free(head->data);
+        free(head);
+        head = next;
+        next = head->next;
+		//printf("enter\n");
+		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
+
+	free(head->data);
+	free(head);
+	head = next;
+
+	LAR = (LAR + 1) % NUM_SEQ_NUM;
 }
 
 /*
@@ -121,17 +194,19 @@ void *receiveAcknowledgements(void *ptr) {
 	    memcpy(&ack_num, &buf[3], 1);
 	    ack_num -= 48;
 
-	    if (ack_num >= (LAR + 1) % NUM_SEQ_NUM) {
+	    if (ack_num >= (LAR + 1) % NUM_SEQ_NUM || ack_num < (LAR - 4)) {
 	    	printf("Received valid packet (%s)\n", buf);
-	    	while (ack_num != (LAR + 1) % NUM_SEQ_NUM)
-	    	{
-	    		//printf("enter\n");
-	    		markPacketAsInactive(LAR + 1);
-	    		LAR = (LAR + 1) % NUM_SEQ_NUM;
-	    	}
+
 	    	markPacketAsInactive(ack_num);
-	    	LAR = (LAR + 1) % NUM_SEQ_NUM;
 	    	pthread_cond_broadcast(&cv);
+
+	    	// while (ack_num != (LAR + 1) % NUM_SEQ_NUM) {
+	    	// 	//printf("enter\n");
+	    	// 	markPacketAsInactive(LAR + 1);
+	    	// 	LAR = (LAR + 1) % NUM_SEQ_NUM;
+	    	// }
+	    	// markPacketAsInactive(ack_num);
+	    	// LAR = (LAR + 1) % NUM_SEQ_NUM;
 	    }
 	    else {
 	    	printf("Received random ack (%s)\n", buf);
@@ -185,16 +260,16 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			memcpy(buf, &seq_num, 1);
 
 			// Update the window linked list
+
 			packet->packet_id = id;
 			packet->seq_num = seq_num;
 			memcpy(packet->data, ptr, bytesRead);
 			packet->send_time = time(0);
-			packet->active = true;
 			packet = packet->next;
 
 			int numBytes;
 			fflush(stdout);
-			// printf("Sending out packet (%d)\n", seq_num);
+			printf("Sending out packet (%d)\n", seq_num);
 			if ((numBytes = sendto(sockfd, buf, bytesRead+1, 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		        perror("sendto");
 		        exit(1);
@@ -221,6 +296,8 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		 //    }
 			// else
 			// {
+		    alarm(1);
+
 			seq_num = (seq_num + 1) % NUM_SEQ_NUM;
 			// }
 
@@ -246,7 +323,7 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	signal(SIGINT, SIGINT_handler);
-	signal(SIGALRM, checkForTimeouts);
+	signal(SIGALRM, awakenTimeoutThread);
 
 	char *hostname = argv[1];
 	char *portNum  = argv[2];
@@ -307,11 +384,11 @@ int main(int argc, char** argv)
 	}
 
 	// // Create thread for waiting and timeouts
-	// thread_t *tid = calloc(SWS, sizeof(thread_t));
-	// for (i = 0; i < SWS; i++) {
-	// 	tid[i].id = i;
-	// 	pthread_create(&tid[i].pid, NULL, waitAndTimeout, &tid[i]);
-	// }
+	pthread_t timeout_id;
+    if (pthread_create(&timeout_id, NULL, checkForTimeouts, NULL) != 0) {
+        perror("pthread_create");
+        exit(1);
+    }
 
 	reliablyTransfer(hostname, udpPort, filename, numBytes, p);
 
