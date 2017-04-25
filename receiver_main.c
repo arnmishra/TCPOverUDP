@@ -83,23 +83,25 @@ void insert_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count)
     }
 }
 
-void write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* output_file)
+int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* output_file)
 {
+    int final_seq_num = seq_num;
     int num_nodes = 1;
     int malloc_bytes = (int)(byte_count);
     printf("Byte Count:%i\n", (int)(byte_count));
     if(head && head->seq_num == seq_num+1)
     {
-        malloc_bytes += sizeof(head->data);
+        malloc_bytes += strlen(head->data);
         num_nodes++;
         data_t *temp = head;
+        final_seq_num = head->seq_num;
         while(temp->next && temp->next->seq_num == temp->seq_num+1)
         {
-            malloc_bytes += sizeof(temp->next->data);
+            malloc_bytes += strlen(temp->next->data);
             num_nodes++;
+            final_seq_num = temp->seq_num;
             temp = temp->next;
         }
-
     }
     char * batch_write = malloc(malloc_bytes);
     memcpy(batch_write, buf, byte_count);
@@ -107,20 +109,21 @@ void write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* 
     int num_bytes = (int)(byte_count);
     if(num_nodes > 1)
     {
-        while(i<num_nodes)
+        while(i < num_nodes)
         {
-            memcpy(batch_write+num_bytes, head->data, sizeof(head->data));
+            memcpy(batch_write+num_bytes, head->data, strlen(head->data));
             num_bytes += sizeof(head->data);
             i++;
-            head = head->next;
-            free(head->prev->data);
-            free(head->prev);
-            head->prev = NULL;
+            data_t *next = head->next;
+            free(head->data);
+            free(head);
+            head = next;
         }
     }
     //printf("Writing: %s\n", batch_write);
     fwrite(batch_write, 1, num_bytes, output_file); // Skip the sequence number and write the rest
     fflush(output_file);
+    return final_seq_num;
 }
 
 void reliablyReceive(char * myUDPport, char* destinationFile) {
@@ -164,12 +167,13 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
             {
                 NFE = (NFE + 1) % NUM_SEQ_NUM;
                 LFA = (LFA + 1) % NUM_SEQ_NUM;
-                acknowledge_num = seq_num;
-                write_data(buf+1, seq_num, byte_count-1, output_file);
+                //printf("writing\n");
+                acknowledge_num = write_data(buf+1, seq_num, byte_count-1, output_file);
             }
             else
             {
-                acknowledge_num = NFE;
+                acknowledge_num = NFE - 1;
+                //printf("inserting\n");
                 insert_data(buf+1, seq_num, byte_count-1);
             }
         }
