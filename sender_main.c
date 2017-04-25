@@ -113,10 +113,12 @@ void *checkForTimeouts(void *arg) {
 
 }
 
-void insert_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count)
+void insert_data(char buf[MAX_DATA_SIZE], int packet_id, int seq_num, time_t send_time, ssize_t byte_count)
 {
     packet_t *node = malloc(sizeof(packet_t));
     node->seq_num = seq_num;
+    node->packet_id = packet_id;
+    node->send_time = send_time;
     node->data = malloc(byte_count);
     memcpy(node->data, buf, byte_count);
     if(head)
@@ -165,7 +167,7 @@ void markPacketAsInactive(int ack_num) {
         free(head->data);
         free(head);
         head = next;
-        next = head->next;
+        head->prev = NULL;
 		//printf("enter\n");
 		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
@@ -260,12 +262,12 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			memcpy(buf, &seq_num, 1);
 
 			// Update the window linked list
-
-			packet->packet_id = id;
-			packet->seq_num = seq_num;
-			memcpy(packet->data, ptr, bytesRead);
-			packet->send_time = time(0);
-			packet = packet->next;
+			insert_data(buf, id, seq_num, time(0), ssize_t bytesRead)
+			// packet->packet_id = id;
+			// packet->seq_num = seq_num;
+			// memcpy(packet->data, ptr, bytesRead);
+			// packet->send_time = time(0);
+			// packet = packet->next;
 
 			int numBytes;
 			fflush(stdout);
@@ -398,6 +400,11 @@ int main(int argc, char** argv)
 		perror("SEND :(\n");
 		exit(1);
 	}
+
+	///////////////////////////////////////////////////////////////////////////////
+	//TODO: Don't end here. Make sure all acks come in before ending the program.//
+	///////////////////////////////////////////////////////////////////////////////
+
 
     freeaddrinfo(servinfo);
 }
