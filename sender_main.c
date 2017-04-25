@@ -165,13 +165,15 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			char *ptr = buf + 1;
 			size_t bytesRead;
 			if (bytesToTransfer > MAX_DATA_SIZE) {
-				fread(ptr, MAX_DATA_SIZE, 1, f);
-				bytesRead = MAX_DATA_SIZE;
+				bytesRead = fread(ptr, 1, MAX_DATA_SIZE, f);
+				//printf("1: %i\n", fileNotFinished);
+				//bytesRead = MAX_DATA_SIZE;
 				bytesToTransfer -= MAX_DATA_SIZE;
 			}
 			else {
-				fread(ptr, bytesToTransfer, 1, f);
-				bytesRead = bytesToTransfer;
+				bytesRead = fread(ptr, 1, bytesToTransfer, f);
+				//printf("2: %i\n", fileNotFinished);
+				//bytesRead = bytesToTransfer;
 				bytesToTransfer = 0;
 			}
 
