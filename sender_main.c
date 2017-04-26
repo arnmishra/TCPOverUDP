@@ -29,8 +29,10 @@ pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
 
 pthread_cond_t cv_timeout = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t m_timeout = PTHREAD_MUTEX_INITIALIZER;
-
 bool timeout_check = false;
+
+pthread_cond_t cv_packets = PTHREAD_COND_INITIALIZER;
+pthread_mutex_t m_packets = PTHREAD_MUTEX_INITIALIZER;
 
 // NOT USED YET
 // Store the last packets sent in the window (if resend needed)
@@ -38,6 +40,7 @@ typedef struct packet {
 	int packet_id;
 	char seq_num;
 	char *data;
+	int num_bytes;
 	time_t send_time;
 	struct packet *next;
 	struct packet *prev;
@@ -46,10 +49,10 @@ packet_t *head;
 packet_t *tail;
 
 // Argument for the pthread function receiveAcknowledgements
-typedef struct acknowledgementThreadArg {
+typedef struct thread_arg {
 	unsigned short int udpPort;
 	struct addrinfo *p;
-} acknowledgementThreadArg;
+} thread_arg_t;
 
 typedef struct thread {
 	pthread_t pid;
@@ -75,14 +78,17 @@ void SIGINT_handler(int val) {
 }
 
 void awakenTimeoutThread(int val) {
-    printf("Checking for timeouts...\n");
     pthread_mutex_lock(&m_timeout);
     timeout_check = true;
     pthread_cond_signal(&cv_timeout);
     pthread_mutex_unlock(&m_timeout);
 }
 
-void *checkForTimeouts(void *arg) {
+void *checkForTimeouts(void *ptr) {
+	thread_arg_t *arg = ptr;
+	unsigned short int udpPort = arg->udpPort;
+	struct addrinfo *p = arg->p;
+
     while (true) {
         // Sleep until SIGALRM sets timeout_check flag
         pthread_mutex_lock(&m_timeout);
@@ -93,41 +99,72 @@ void *checkForTimeouts(void *arg) {
         timeout_check = false;
         pthread_mutex_unlock(&m_timeout);
 
+        printf("Checking for timeouts...\n");
+
         // Iterate through all packets checking for timeouts
+        pthread_mutex_lock(&m_packets);
         packet_t *packet = head;
 
         time_t now = time(0);
         while (packet != NULL) {
+        	// printf("Checking packet %d\n", packet->packet_id);
             double diff = difftime(now, packet->send_time) * 1000; // x1000 for ms
             if (diff > 100) {
-                printf("Packet %u timed out! Resending all n buffers...\n", packet->packet_id);
-                seq_num = packet->seq_num;
-                pthread_cond_signal(&cv);
+                printf("Packet %d timed out! Resending all n buffers...\n", packet->packet_id);
+
+                // Resend everything
+                while (packet != NULL) {
+                	printf("Retransmitting packet (%d)\n", packet->seq_num);
+					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
+				        perror("sendto");
+				        exit(1);
+				    }
+				    alarm(1);
+				    packet = packet->next;
+                }
+
+                // pthread_cond_signal(&cv);
                 break;
             }
             else
                 break;  // All packets after this one are newer anyway
             packet = packet->next;
         }
+        pthread_mutex_unlock(&m_packets);
     }
 
 }
 
-void insert_data(char buf[MAX_DATA_SIZE], int packet_id, int seq_num, time_t send_time, ssize_t byte_count)
+
+void printPacketList() {
+	packet_t *node = head;
+	while (node != NULL) {
+		printf("%d -- ", node->seq_num);
+		node = node->next;
+	}
+	printf("\n");
+}
+
+void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_t byte_count)
 {
+	pthread_mutex_lock(&m_packets);
+
     packet_t *node = malloc(sizeof(packet_t));
     node->seq_num = seq_num;
     node->packet_id = packet_id;
     node->send_time = send_time;
     node->data = malloc(byte_count);
+    node->num_bytes = byte_count;
     memcpy(node->data, buf, byte_count);
     if(head)
     {
-        int inserted = 0;
+		printf("Inserting packet w/ id = %d, head = %d\n", packet_id, head->packet_id);
+		printPacketList();
+        bool inserted = false;
         packet_t *temp = head;
         while(temp)
         {
-            if(node->seq_num < temp->seq_num) //insert node before temp
+            if(node->seq_num < temp->seq_num && (temp->seq_num - 4) < node->seq_num ) //insert node before temp BUT gotta account for wrap of seq nums (i.e. 5 - 6 - 7 - 0)
             {
                 node->next = temp;
                 node->prev = temp->prev;
@@ -136,8 +173,10 @@ void insert_data(char buf[MAX_DATA_SIZE], int packet_id, int seq_num, time_t sen
                     temp->prev->next = node;
                 }
                 temp->prev = node;
-                inserted = 1;
+                inserted = true;
+                break;
             }
+            temp = temp->next;
         }
         if(!inserted) //insert node at tail
         {
@@ -154,36 +193,53 @@ void insert_data(char buf[MAX_DATA_SIZE], int packet_id, int seq_num, time_t sen
         head->prev = NULL;
         tail = head;
     }
+
+    printf("After inserting packet %d\n===============\n", packet_id);
+    printPacketList();
+    printf("==============\n");
+
+    pthread_mutex_unlock(&m_packets);
 }
 
 /*
  * Given an ack number, mark the packet as inactive in the window list
  */
 void markPacketAsInactive(int ack_num) {
+	pthread_mutex_lock(&m_packets);
+
 	packet_t *next = head->next;
+
+	printf("Removing packet %d!\n", ack_num);
+	printf("=========\n");
+	printPacketList();
+	printf("=========\n");
 
 	while (ack_num != (LAR + 1) % NUM_SEQ_NUM)
 	{
+		printf("Removing packet %d\n", head->packet_id);
         free(head->data);
         free(head);
         head = next;
-        head->prev = NULL;
+    	head->prev = NULL;
 		//printf("enter\n");
 		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
 
+	printf("Removing packet %d\n", head->packet_id);
 	free(head->data);
 	free(head);
 	head = next;
 
 	LAR = (LAR + 1) % NUM_SEQ_NUM;
+
+	pthread_mutex_unlock(&m_packets);
 }
 
 /*
  * Thread for receiving acknowledgements, wakes up the sleeping transfer thread
  */
 void *receiveAcknowledgements(void *ptr) {
-	acknowledgementThreadArg *arg = ptr;
+	thread_arg_t *arg = ptr;
 	unsigned short int udpPort = arg->udpPort;
 	struct addrinfo *p = arg->p;
 
@@ -262,16 +318,16 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			memcpy(buf, &seq_num, 1);
 
 			// Update the window linked list
-			insert_data(buf, id, seq_num, time(0), ssize_t bytesRead)
+			insert_data(buf, id, seq_num, time(0), bytesRead+1);
 			// packet->packet_id = id;
 			// packet->seq_num = seq_num;
 			// memcpy(packet->data, ptr, bytesRead);
 			// packet->send_time = time(0);
 			// packet = packet->next;
 
-			int numBytes;
 			fflush(stdout);
 			printf("Sending out packet (%d)\n", seq_num);
+			int numBytes;
 			if ((numBytes = sendto(sockfd, buf, bytesRead+1, 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		        perror("sendto");
 		        exit(1);
@@ -365,20 +421,8 @@ int main(int argc, char** argv)
     unsigned short int udpPort = (unsigned short int)atoi(portNum);
 	unsigned long long int numBytes = atoll(argv[4]);
 
-	// Initialize the global linked list of the send window
-	int i;
-	head = malloc(sizeof(packet_t));
-	packet_t *prev = head;
-	packet_t *cur;
-	for (i = 0; i < SWS; i++) {
-		cur = malloc(sizeof(packet_t));
-		prev->next = cur;
-		prev = cur;
-	}
-	tail = prev;
-
 	// Create thread for receiving ACKs
-	acknowledgementThreadArg arg = { .udpPort = udpPort, .p = p };
+	thread_arg_t arg = { .udpPort = udpPort, .p = p };
 	pthread_t ack_id;
 	if (pthread_create(&ack_id, NULL, receiveAcknowledgements, &arg) != 0) {
 		perror("pthread_create");
@@ -387,7 +431,7 @@ int main(int argc, char** argv)
 
 	// // Create thread for waiting and timeouts
 	pthread_t timeout_id;
-    if (pthread_create(&timeout_id, NULL, checkForTimeouts, NULL) != 0) {
+    if (pthread_create(&timeout_id, NULL, checkForTimeouts, &arg) != 0) {
         perror("pthread_create");
         exit(1);
     }

@@ -152,7 +152,10 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
         // printf("Received message of length %zi: %s\n", byte_count, buf+1);
         memcpy(&seq_num, &buf[0], 1);
-        // printf("Sequence number: %u\n", seq_num);
+        printf("Sequence number: %u\n", seq_num);
+
+        // if (seq_num == 4)
+        //     sleep(5);
 
         if (buf[0] == 'F') {
             // printf("RECEIVED AN F\n");
@@ -167,13 +170,13 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
             {
                 NFE = (NFE + 1) % NUM_SEQ_NUM;
                 LFA = (LFA + 1) % NUM_SEQ_NUM;
-                //printf("writing\n");
+                // printf("writing\n");
                 acknowledge_num = write_data(buf+1, seq_num, byte_count-1, output_file);
             }
             else
             {
                 acknowledge_num = NFE - 1;
-                //printf("inserting\n");
+                // printf("inserting\n");
                 insert_data(buf+1, seq_num, byte_count-1);
             }
         }

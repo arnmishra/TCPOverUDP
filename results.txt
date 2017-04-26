@@ -1,15 +1,15 @@
-0 sanity check: transfer single byte failed: your receiver didn't terminate within 3s.
-0 transfer 50K failed: only received 11768 of 50000 after 6s.
-0 utilize empty link failed: 11768 of 65000000 were written.
-0 drop rate=0.05 failed: received file had an error.
+10 sanity check: transfer single byte succeeded!
+10 transfer 50K succeeded!
+0 tcp_test3.pl timed out.
+0 tcp_test4.pl timed out.
 0 tcp_test5.pl timed out.
-0 quick convergence failed: failed to send 20MB in 20s (receiver wrote 11768 bytes)
-0 TCP friendliness failed: your process died or ended early. (note: it's being given 999000999000 as the numBytes argument)
-0 TCP friendliness with 1% loss failed: your process died or ended early. (note: it's being given 999000999000 as the numBytes argument)
-0 11768 /home/grader/cur/VSTCPRECV 10 competition vs TCP failed: received file had an error.
+0 quick convergence failed: failed to send 20MB in 20s (receiver wrote 5648640 bytes)
+10 TCP friendliness succeeded! (TCP got 41.2 Mbps)
+10 TCP friendliness with 1% loss succeeded! (TCP got 73.4 Mbps)
+0 competition vs TCP failed: your receiver wrote 11159006 of 65MB to disk in 40 seconds.
 ----------------
-Total score: 10
+Total score: 50
 
-svn rev: 7019
+svn rev: 7240
 
-11:51 PM on April 23, 2017
+09:46 PM on April 25, 2017
