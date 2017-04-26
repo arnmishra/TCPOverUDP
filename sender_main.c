@@ -158,8 +158,8 @@ void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_
     memcpy(node->data, buf, byte_count);
     if(head)
     {
-		printf("Inserting packet w/ id = %d, head = %d\n", packet_id, head->packet_id);
-		printPacketList();
+		// printf("Inserting packet w/ id = %d, head = %d\n", packet_id, head->packet_id);
+		// printPacketList();
         bool inserted = false;
         packet_t *temp = head;
         while(temp)
@@ -194,9 +194,9 @@ void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_
         tail = head;
     }
 
-    printf("After inserting packet %d\n===============\n", packet_id);
-    printPacketList();
-    printf("==============\n");
+    // printf("After inserting packet %d\n===============\n", packet_id);
+    // printPacketList();
+    // printf("==============\n");
 
     pthread_mutex_unlock(&m_packets);
 }
@@ -207,16 +207,18 @@ void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_
 void markPacketAsInactive(int ack_num) {
 	pthread_mutex_lock(&m_packets);
 
+	// printf("Received ack %d\n", ack_num);
+
 	packet_t *next = head->next;
 
-	printf("Removing packet %d!\n", ack_num);
-	printf("=========\n");
-	printPacketList();
-	printf("=========\n");
+	// printf("Removing packet %d!\n", ack_num);
+	// printf("=========\n");
+	// printPacketList();
+	// printf("=========\n");
 
 	while (ack_num != (LAR + 1) % NUM_SEQ_NUM)
 	{
-		printf("Removing packet %d\n", head->packet_id);
+		// printf("Removing packet %d\n", head->packet_id);
         free(head->data);
         free(head);
         head = next;
@@ -225,13 +227,14 @@ void markPacketAsInactive(int ack_num) {
 		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
 
-	printf("Removing packet %d\n", head->packet_id);
+	// printf("Removing packet %d\n", head->packet_id);
 	free(head->data);
 	free(head);
 	head = next;
 
 	LAR = (LAR + 1) % NUM_SEQ_NUM;
 
+	pthread_cond_broadcast(&cv);
 	pthread_mutex_unlock(&m_packets);
 }
 
@@ -250,13 +253,17 @@ void *receiveAcknowledgements(void *ptr) {
 
 	    char ack_num;
 	    memcpy(&ack_num, &buf[3], 1);
+
+	    if (ack_num == 'F') {
+	    	printf("RECEIVED ACKNOWLEDGEMENT...\n");
+	    	printf("ENDING PROGRAM...\n");
+	    	break;
+	    }
+
 	    ack_num -= 48;
 
 	    if (ack_num >= (LAR + 1) % NUM_SEQ_NUM || ack_num < (LAR - 4)) {
-	    	printf("Received valid packet (%s)\n", buf);
-
 	    	markPacketAsInactive(ack_num);
-	    	pthread_cond_broadcast(&cv);
 
 	    	// while (ack_num != (LAR + 1) % NUM_SEQ_NUM) {
 	    	// 	//printf("enter\n");
@@ -293,12 +300,14 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 	}
 
 	int id = 0;
+	pthread_mutex_lock(&m);
 	while (bytesToTransfer > 0) {
-		pthread_mutex_lock(&m);
 
-		packet_t *packet = head;
-		while (( (seq_num > LAR && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
-			//printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
+		// printf("Any packets to send?\n");
+		// printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
+		// printPacketList();
+
+		while (( (seq_num > LAR && seq_num <= (LAR + SWS))  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
 			char buf[MAX_PACKET_SIZE];
 			char *ptr = buf + 1;
 			size_t bytesRead;
@@ -319,22 +328,14 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 
 			// Update the window linked list
 			insert_data(buf, id, seq_num, time(0), bytesRead+1);
-			// packet->packet_id = id;
-			// packet->seq_num = seq_num;
-			// memcpy(packet->data, ptr, bytesRead);
-			// packet->send_time = time(0);
-			// packet = packet->next;
 
 			fflush(stdout);
-			printf("Sending out packet (%d)\n", seq_num);
+			// printf("Sending out packet (%d)\n", seq_num);
 			int numBytes;
 			if ((numBytes = sendto(sockfd, buf, bytesRead+1, 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		        perror("sendto");
 		        exit(1);
 		    }
-
-		    // ualarm(5000, 0);
-		    // alarm(1);
 
 		 //    if(seq_num == 0)
 		 //    {
@@ -357,7 +358,6 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		    alarm(1);
 
 			seq_num = (seq_num + 1) % NUM_SEQ_NUM;
-			// }
 
 			id += 1;
 			//printf("bytes: %i\n", bytesToTransfer);
@@ -368,8 +368,8 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		// printf("rT: Sleeping with %lld to send...\n", bytesToTransfer);
 		pthread_cond_wait(&cv, &m);
 		// printf("rT: Woken up!...\n");
-		pthread_mutex_unlock(&m);
 	}
+	pthread_mutex_unlock(&m);
 
 	fclose(f);
 }
@@ -440,15 +440,19 @@ int main(int argc, char** argv)
 
 	// Done sending shit out, let the receiver know to stop
 	char *buf = "FIN";
+	insert_data(buf, 0, 0, time(0), 3);
 	if ((numbytes = sendto(sockfd, buf, strlen(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		perror("SEND :(\n");
 		exit(1);
 	}
+	alarm(1);
 
 	///////////////////////////////////////////////////////////////////////////////
 	//TODO: Don't end here. Make sure all acks come in before ending the program.//
 	///////////////////////////////////////////////////////////////////////////////
-
+	void *result;
+	pthread_join(ack_id, &result);
+	pthread_cancel(timeout_id);
 
     freeaddrinfo(servinfo);
 }

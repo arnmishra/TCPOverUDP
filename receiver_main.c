@@ -151,16 +151,20 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
         // printf("Received message of length %zi: %s\n", byte_count, buf+1);
-        memcpy(&seq_num, &buf[0], 1);
-        printf("Sequence number: %u\n", seq_num);
 
         // if (seq_num == 4)
         //     sleep(5);
 
         if (buf[0] == 'F') {
-            // printf("RECEIVED AN F\n");
+            char *buffer = malloc(4);
+            sprintf(buffer, "ackF");
+            printf("Sending back: %s\n", buffer);
+            sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
             break;
         }
+
+        memcpy(&seq_num, &buf[0], 1);
+        // printf("Sequence number: %u\n", seq_num);
 
         int acknowledge_num;
         // printf("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA);
