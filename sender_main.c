@@ -66,6 +66,8 @@ void SIGINT_handler(int val) {
 
 	pthread_cond_destroy(&cv);
 	pthread_mutex_destroy(&m);
+    pthread_cond_destroy(&cv_timeout);
+    pthread_mutex_destroy(&m_timeout);
 
 	// Free the linked list
 	while (head != NULL) {
@@ -158,8 +160,6 @@ void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_
     memcpy(node->data, buf, byte_count);
     if(head)
     {
-		// printf("Inserting packet w/ id = %d, head = %d\n", packet_id, head->packet_id);
-		// printPacketList();
         bool inserted = false;
         packet_t *temp = head;
         while(temp)
@@ -194,9 +194,9 @@ void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_
         tail = head;
     }
 
-    // printf("After inserting packet %d\n===============\n", packet_id);
-    // printPacketList();
-    // printf("==============\n");
+    printf("After inserting packet %d\n===============\n", packet_id);
+    printPacketList();
+    printf("==============\n");
 
     pthread_mutex_unlock(&m_packets);
 }
@@ -207,14 +207,11 @@ void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_
 void markPacketAsInactive(int ack_num) {
 	pthread_mutex_lock(&m_packets);
 
-	// printf("Received ack %d\n", ack_num);
+	printf("Received ack %d\n", ack_num);
 
 	packet_t *next = head->next;
 
 	// printf("Removing packet %d!\n", ack_num);
-	// printf("=========\n");
-	// printPacketList();
-	// printf("=========\n");
 
 	while (ack_num != (LAR + 1) % NUM_SEQ_NUM)
 	{
@@ -234,7 +231,10 @@ void markPacketAsInactive(int ack_num) {
 
 	LAR = (LAR + 1) % NUM_SEQ_NUM;
 
-	pthread_cond_broadcast(&cv);
+    printf("After removing...\n=========\n");
+    printPacketList();
+    printf("=========\n");
+
 	pthread_mutex_unlock(&m_packets);
 }
 
@@ -257,6 +257,8 @@ void *receiveAcknowledgements(void *ptr) {
 	    if (ack_num == 'F') {
 	    	printf("RECEIVED ACKNOWLEDGEMENT...\n");
 	    	printf("ENDING PROGRAM...\n");
+            free(head->data);
+            free(head);
 	    	break;
 	    }
 
@@ -264,6 +266,7 @@ void *receiveAcknowledgements(void *ptr) {
 
 	    if (ack_num >= (LAR + 1) % NUM_SEQ_NUM || ack_num < (LAR - 4)) {
 	    	markPacketAsInactive(ack_num);
+            pthread_cond_broadcast(&cv);
 
 	    	// while (ack_num != (LAR + 1) % NUM_SEQ_NUM) {
 	    	// 	//printf("enter\n");
@@ -303,9 +306,9 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 	pthread_mutex_lock(&m);
 	while (bytesToTransfer > 0) {
 
-		// printf("Any packets to send?\n");
-		// printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
-		// printPacketList();
+		printf("Any packets to send?\n");
+		printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
+		printPacketList();
 
 		while (( (seq_num > LAR && seq_num <= (LAR + SWS))  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
 			char buf[MAX_PACKET_SIZE];
@@ -363,11 +366,13 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			//printf("bytes: %i\n", bytesToTransfer);
 		}
 		//printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
+        if (bytesToTransfer == 0)
+            break;
 
 		// Conditional wait here until an ACK is received, or something timesOut
-		// printf("rT: Sleeping with %lld to send...\n", bytesToTransfer);
+		printf("rT: Sleeping with %lld to send...\n", bytesToTransfer);
 		pthread_cond_wait(&cv, &m);
-		// printf("rT: Woken up!...\n");
+		printf("rT: Woken up!...\n");
 	}
 	pthread_mutex_unlock(&m);
 

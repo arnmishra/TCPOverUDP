@@ -1,15 +1,15 @@
 10 sanity check: transfer single byte succeeded!
 10 transfer 50K succeeded!
 0 tcp_test3.pl timed out.
-0 tcp_test4.pl timed out.
-0 tcp_test5.pl timed out.
-0 quick convergence failed: failed to send 20MB in 20s (receiver wrote 5648640 bytes)
-10 TCP friendliness succeeded! (TCP got 41.2 Mbps)
-10 TCP friendliness with 1% loss succeeded! (TCP got 73.4 Mbps)
-0 competition vs TCP failed: your receiver wrote 11159006 of 65MB to disk in 40 seconds.
+0 drop rate=0.05 failed: received file had an error.
+0 drop rate=0.25 failed: only received 0 of 1000000 after 10s.
+0 quick convergence failed: failed to send 20MB in 20s (receiver wrote 5630988 bytes)
+10 TCP friendliness succeeded! (TCP got 40.1 Mbps)
+0 TCP friendliness with 1% loss failed: your process died or ended early. (note: it's being given 999000999000 as the numBytes argument)
+0 competition vs TCP failed: your receiver wrote 9754201 of 65MB to disk in 40 seconds.
 ----------------
-Total score: 50
+Total score: 40
 
-svn rev: 7240
+svn rev: 7379
 
-09:46 PM on April 25, 2017
+11:36 PM on April 26, 2017
