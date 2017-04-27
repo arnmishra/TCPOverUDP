@@ -103,34 +103,40 @@ void *checkForTimeouts(void *ptr) {
 
         printf("Checking for timeouts...\n");
 
+
         // Iterate through all packets checking for timeouts
         pthread_mutex_lock(&m_packets);
         packet_t *packet = head;
 
-        time_t now = time(0);
-        while (packet != NULL) {
-        	// printf("Checking packet %d\n", packet->packet_id);
-            double diff = difftime(now, packet->send_time) * 1000; // x1000 for ms
-            if (diff > 100) {
-                printf("Packet %d timed out! Resending all n buffers...\n", packet->packet_id);
+        if (!packet) {
+            pthread_cond_broadcast(&cv);
+        }
+        else {
+            time_t now = time(0);
+            while (packet != NULL) {
+            	// printf("Checking packet %d\n", packet->packet_id);
+                double diff = difftime(now, packet->send_time) * 1000; // x1000 for ms
+                if (diff > 100) {
+                    printf("Packet %d timed out! Resending all n buffers...\n", packet->packet_id);
 
-                // Resend everything
-                while (packet != NULL) {
-                	printf("Retransmitting packet (%d)\n", packet->seq_num);
-					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
-				        perror("sendto");
-				        exit(1);
-				    }
-				    alarm(1);
-				    packet = packet->next;
+                    // Resend everything
+                    while (packet != NULL) {
+                    	printf("Retransmitting packet (%d)\n", packet->seq_num);
+    					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
+    				        perror("sendto");
+    				        exit(1);
+    				    }
+    				    alarm(1);
+    				    packet = packet->next;
+                    }
+
+                    // pthread_cond_signal(&cv);
+                    break;
                 }
-
-                // pthread_cond_signal(&cv);
-                break;
+                else
+                    break;  // All packets after this one are newer anyway
+                packet = packet->next;
             }
-            else
-                break;  // All packets after this one are newer anyway
-            packet = packet->next;
         }
         pthread_mutex_unlock(&m_packets);
     }
@@ -255,10 +261,12 @@ void *receiveAcknowledgements(void *ptr) {
 	    memcpy(&ack_num, &buf[3], 1);
 
 	    if (ack_num == 'F') {
+            pthread_mutex_lock(&m_packets);
 	    	printf("RECEIVED ACKNOWLEDGEMENT...\n");
 	    	printf("ENDING PROGRAM...\n");
-            free(head->data);
-            free(head);
+            // free(head->data);
+            // free(head);
+            pthread_mutex_unlock(&m_packets);
 	    	break;
 	    }
 
@@ -267,14 +275,6 @@ void *receiveAcknowledgements(void *ptr) {
 	    if (ack_num >= (LAR + 1) % NUM_SEQ_NUM || ack_num < (LAR - 4)) {
 	    	markPacketAsInactive(ack_num);
             pthread_cond_broadcast(&cv);
-
-	    	// while (ack_num != (LAR + 1) % NUM_SEQ_NUM) {
-	    	// 	//printf("enter\n");
-	    	// 	markPacketAsInactive(LAR + 1);
-	    	// 	LAR = (LAR + 1) % NUM_SEQ_NUM;
-	    	// }
-	    	// markPacketAsInactive(ack_num);
-	    	// LAR = (LAR + 1) % NUM_SEQ_NUM;
 	    }
 	    else {
 	    	printf("Received random ack (%s)\n", buf);
@@ -450,6 +450,12 @@ int main(int argc, char** argv)
 		perror("SEND :(\n");
 		exit(1);
 	}
+
+    pthread_mutex_lock(&m_packets);
+    printf("Printing packet list...\n");
+    printPacketList();
+    printf("Done printing packet list\n");
+    pthread_mutex_unlock(&m_packets);
 	alarm(1);
 
 	///////////////////////////////////////////////////////////////////////////////
