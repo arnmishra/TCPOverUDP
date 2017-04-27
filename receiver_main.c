@@ -88,7 +88,7 @@ int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* o
     int final_seq_num = seq_num;
     int num_nodes = 1;
     int malloc_bytes = (int)(byte_count);
-    printf("Byte Count:%i\n", (int)(byte_count));
+    // printf("Byte Count:%i\n", (int)(byte_count));
     if(head && head->seq_num == seq_num+1)
     {
         malloc_bytes += strlen(head->data);
@@ -120,7 +120,7 @@ int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* o
             head = next;
         }
     }
-    printf("Writing: %i\n", num_bytes);
+    // printf("Writing: %i\n", num_bytes);
     fwrite(batch_write, 1, num_bytes, output_file); // Skip the sequence number and write the rest
     fflush(output_file);
     return final_seq_num;

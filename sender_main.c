@@ -101,7 +101,7 @@ void *checkForTimeouts(void *ptr) {
         timeout_check = false;
         pthread_mutex_unlock(&m_timeout);
 
-        printf("Checking for timeouts...\n");
+        // printf("Checking for timeouts...\n");
 
 
         // Iterate through all packets checking for timeouts
@@ -117,11 +117,11 @@ void *checkForTimeouts(void *ptr) {
             	// printf("Checking packet %d\n", packet->packet_id);
                 double diff = difftime(now, packet->send_time) * 1000; // x1000 for ms
                 if (diff > 100) {
-                    printf("Packet %d timed out! Resending all n buffers...\n", packet->packet_id);
+                    // printf("Packet %d timed out! Resending all n buffers...\n", packet->packet_id);
 
                     // Resend everything
                     while (packet != NULL) {
-                    	printf("Retransmitting packet (%d)\n", packet->seq_num);
+                    	// printf("Retransmitting packet (%d)\n", packet->seq_num);
     					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
     				        perror("sendto");
     				        exit(1);
@@ -200,9 +200,9 @@ void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_
         tail = head;
     }
 
-    printf("After inserting packet %d\n===============\n", packet_id);
-    printPacketList();
-    printf("==============\n");
+    // printf("After inserting packet %d\n===============\n", packet_id);
+    // printPacketList();
+    // printf("==============\n");
 
     pthread_mutex_unlock(&m_packets);
 }
@@ -237,9 +237,9 @@ void markPacketAsInactive(int ack_num) {
 
 	LAR = (LAR + 1) % NUM_SEQ_NUM;
 
-    printf("After removing...\n=========\n");
-    printPacketList();
-    printf("=========\n");
+    // printf("After removing...\n=========\n");
+    // printPacketList();
+    // printf("=========\n");
 
 	pthread_mutex_unlock(&m_packets);
 }
@@ -306,9 +306,9 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 	pthread_mutex_lock(&m);
 	while (bytesToTransfer > 0) {
 
-		printf("Any packets to send?\n");
-		printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
-		printPacketList();
+		// printf("Any packets to send?\n");
+		// printf("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS);
+		// printPacketList();
 
 		while (( (seq_num > LAR && seq_num <= (LAR + SWS))  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
 			char buf[MAX_PACKET_SIZE];
@@ -370,9 +370,9 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
             break;
 
 		// Conditional wait here until an ACK is received, or something timesOut
-		printf("rT: Sleeping with %lld to send...\n", bytesToTransfer);
+		// printf("rT: Sleeping with %lld to send...\n", bytesToTransfer);
 		pthread_cond_wait(&cv, &m);
-		printf("rT: Woken up!...\n");
+		// printf("rT: Woken up!...\n");
 	}
 	pthread_mutex_unlock(&m);
 
@@ -450,12 +450,6 @@ int main(int argc, char** argv)
 		perror("SEND :(\n");
 		exit(1);
 	}
-
-    pthread_mutex_lock(&m_packets);
-    printf("Printing packet list...\n");
-    printPacketList();
-    printf("Done printing packet list\n");
-    pthread_mutex_unlock(&m_packets);
 	alarm(1);
 
 	///////////////////////////////////////////////////////////////////////////////
