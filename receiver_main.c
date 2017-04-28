@@ -8,6 +8,12 @@
 #include <signal.h>
 #include <netdb.h>
 
+#if 1
+    #define PRINT(a) printf a
+#else
+    #define PRINT(a) (void)0
+#endif
+
 #define RWS 4
 #define NUM_SEQ_NUM (2 * RWS)
 #define MAX_PACKET_SIZE 1472
@@ -28,7 +34,7 @@ data_t *tail;
 
 
 // void signalHandler(int val) {
-//  printf("Closing...\n");
+//  PRINT(("Closing...\n"));
 //  close(udpPort);
 //     exit(1);
 // }
@@ -88,7 +94,7 @@ int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* o
     int final_seq_num = seq_num;
     int num_nodes = 1;
     int malloc_bytes = (int)(byte_count);
-    // printf("Byte Count:%i\n", (int)(byte_count));
+    // PRINT(("Byte Count:%i\n", (int)(byte_count)));
     if(head && head->seq_num == seq_num+1)
     {
         malloc_bytes += strlen(head->data);
@@ -120,7 +126,7 @@ int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* o
             head = next;
         }
     }
-    // printf("Writing: %i\n", num_bytes);
+    // PRINT(("Writing: %i\n", num_bytes));
     fwrite(batch_write, 1, num_bytes, output_file); // Skip the sequence number and write the rest
     fflush(output_file);
     return final_seq_num;
@@ -150,7 +156,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     while(1)
     {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
-        // printf("Received message of length %zi: %s\n", byte_count, buf+1);
+        // PRINT(("Received message of length %zi: %s\n", byte_count, buf+1));
 
         // if (seq_num == 4)
         //     sleep(5);
@@ -158,29 +164,29 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         if (buf[0] == 'F') {
             char *buffer = malloc(4);
             sprintf(buffer, "ackF");
-            printf("Sending back: %s\n", buffer);
+            PRINT(("Sending back: %s\n", buffer));
             sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
             break;
         }
 
         memcpy(&seq_num, &buf[0], 1);
-        // printf("Sequence number: %u\n", seq_num);
+        // PRINT(("Sequence number: %u\n", seq_num));
 
         int acknowledge_num;
-        // printf("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA);
+        // PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
         if((seq_num >= NFE && seq_num <= LFA % NUM_SEQ_NUM) || (seq_num <= NFE && seq_num >= (LFA % NUM_SEQ_NUM)))
         {
             if(seq_num == NFE)
             {
                 NFE = (NFE + 1) % NUM_SEQ_NUM;
                 LFA = (LFA + 1) % NUM_SEQ_NUM;
-                // printf("writing\n");
+                // PRINT(("writing\n"));
                 acknowledge_num = write_data(buf+1, seq_num, byte_count-1, output_file);
             }
             else
             {
                 acknowledge_num = NFE - 1;
-                // printf("inserting\n");
+                // PRINT(("inserting\n"));
                 insert_data(buf+1, seq_num, byte_count-1);
             }
         }
@@ -190,7 +196,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         }
         char *buffer = malloc(4);
         sprintf(buffer, "ack%u", acknowledge_num);
-        printf("Sending back: %s\n", buffer);
+        PRINT(("Sending back: %s\n", buffer));
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
     }
 
@@ -199,7 +205,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
 int main(int argc, char** argv) {
     if (argc != 3)
     {
-        fprintf(stderr, "usage: %s UDP_port filename_to_write\n\n", argv[0]);
+        PRINT(("usage: %s UDP_port filename_to_write\n\n", argv[0]));
         exit(1);
     }
 
