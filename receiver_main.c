@@ -163,7 +163,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
 
         if (buf[0] == 'F') {
             char *buffer = malloc(4);
-            sprintf(buffer, "ackF");
+            sprintf(buffer, "F");
             PRINT(("Sending back: %s\n", buffer));
             sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
             break;
@@ -176,26 +176,42 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         // PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
         if((seq_num >= NFE && seq_num <= LFA % NUM_SEQ_NUM) || (seq_num <= NFE && seq_num >= (LFA % NUM_SEQ_NUM)))
         {
-            if(seq_num == NFE)
+            if(seq_num == NFE) //if the next expected packet arrives
             {
-                NFE = (NFE + 1) % NUM_SEQ_NUM;
-                LFA = (LFA + 1) % NUM_SEQ_NUM;
+                //NFE = (NFE + 1) % NUM_SEQ_NUM;
+                //LFA = (LFA + 1) % NUM_SEQ_NUM;
                 // PRINT(("writing\n"));
                 acknowledge_num = write_data(buf+1, seq_num, byte_count-1, output_file);
+                NFE = (acknowledge_num + 1) % NUM_SEQ_NUM;
+                LFA = NFE + RWS - 1;
             }
-            else
+            else //if a packet later than the next expected arrives
             {
                 acknowledge_num = NFE - 1;
                 // PRINT(("inserting\n"));
                 insert_data(buf+1, seq_num, byte_count-1);
             }
         }
-        else
+        else //if a packet that is not in the expected window arrives
         {
             acknowledge_num = NFE;
+            seq_num = NFE-1;
         }
-        char *buffer = malloc(4);
-        sprintf(buffer, "ack%u", acknowledge_num);
+        char *buffer = malloc(2);
+        unsigned char cum_ack;
+        if(NFE == 0)
+        {
+            cum_ack = 7;
+        }
+        else
+        {
+            cum_ack = NFE - 1;
+        }
+        if(seq_num < cum_ack)
+        {
+            seq_num = cum_ack;
+        }
+        sprintf(buffer, "%u%u", cum_ack, seq_num);
         PRINT(("Sending back: %s\n", buffer));
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
     }
