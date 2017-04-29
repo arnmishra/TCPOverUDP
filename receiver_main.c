@@ -60,6 +60,9 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
         data_t *temp = head;
         while(temp)
         {
+            if (node->seq_num == temp->seq_num)
+                return;
+
             if(node->seq_num < temp->seq_num && (temp->seq_num - 4) < node->seq_num) //insert node before temp
             {
                 node->next = temp;
@@ -102,6 +105,9 @@ void printPacketList() {
 
 int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FILE* output_file)
 {
+    PRINT(("write_data:\n"));
+    printPacketList();
+    PRINT(("===========\n"));
     int final_seq_num = sequence_num;
     int num_nodes = 1;
     int malloc_bytes = (int)(byte_count);
@@ -118,7 +124,7 @@ int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FI
             num_nodes++;
             final_seq_num = temp->seq_num;
             temp = temp->next;
-            // PRINT(("final_seq_num = %d\n", final_seq_num));
+            PRINT(("final_seq_num = %d\n", final_seq_num));
         }
     }
     char * batch_write = malloc(malloc_bytes);

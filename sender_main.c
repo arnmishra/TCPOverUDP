@@ -262,23 +262,33 @@ void estimateNewRTT(packet_t *packet) {
 void markPacketAsInactive(int cum_ack) {
 	packet_t *next;
 
-    printPacketList();
+    // printPacketList();
 
 	// PRINT(("Removing packet %d!\n", cum_ack));
 
     // Delete everything in the linked list up until (and including) cum_ack
     // Essentially, delete head until seq_num >= cum_ack
     /////////////////
-    while (head && !((cum_ack <= (head->seq_num) && (head->seq_num - SWS) < cum_ack)))
+
+    // (head->seq_num <= cum_ack && (head->seq_num < (cum_ack - SWS)) || )
+
+
+
+    // head + SWS > cum_ack
+
+    while (head && ((head->seq_num <= cum_ack && (head->seq_num + SWS) > cum_ack) || (head->seq_num - SWS) > cum_ack))
 	{
-		PRINT(("First: Removing packet %d\n", head->seq_num));
+        if (head->seq_num == cum_ack)
+            estimateNewRTT(head);
+
+		PRINT(("Removing packet %d\n", head->seq_num));
 		next = head->next;
         free(head->data);
         free(head);
         head = next;
-        // PRINT(("markPacketAsInactive:\n"));
-        // printPacketList();
-        // PRINT(("====================\n"));
+        PRINT(("markPacketAsInactive:\n"));
+        printPacketList();
+        PRINT(("====================\n"));
         if(head)
         {
         	head->prev = NULL;
@@ -287,25 +297,25 @@ void markPacketAsInactive(int cum_ack) {
 		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
 
-    if(head)
-    {
-        PRINT(("Second: Removing packet %d\n", head->seq_num));
-		next = head->next;
+ //    if(head)
+ //    {
+ //        PRINT(("Second: Removing packet %d\n", head->seq_num));
+	// 	next = head->next;
 
-        estimateNewRTT(head);
+ //        estimateNewRTT(head);
 
-		free(head->data);
-		free(head);
-		head = next;
-        // PRINT(("markPacketAsInactive:\n"));
-        // printPacketList();
-        // PRINT(("====================\n"));
-		if(head)
-        {
-        	head->prev = NULL;
-        }
-		//LAR = (LAR + 1) % NUM_SEQ_NUM;
-	}
+	// 	free(head->data);
+	// 	free(head);
+	// 	head = next;
+ //        // PRINT(("markPacketAsInactive:\n"));
+ //        // printPacketList();
+ //        // PRINT(("====================\n"));
+	// 	if(head)
+ //        {
+ //        	head->prev = NULL;
+ //        }
+	// 	//LAR = (LAR + 1) % NUM_SEQ_NUM;
+	// }
 
 	LAR = cum_ack;
 
@@ -376,8 +386,8 @@ void *receiveAcknowledgements(void *ptr) {
     					temp->next->prev = temp->prev;
     				}
     				estimateNewRTT(temp);
-                    // PRINT(("receiveAcknowledgements: Removing packet %d\n", temp->seq_num));
-                    // printPacketList();
+                    PRINT(("receiveAcknowledgements: Removing packet %d\n", temp->seq_num));
+                    printPacketList();
 
                     if (temp == head)
                         head = NULL;
