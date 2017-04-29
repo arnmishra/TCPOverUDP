@@ -247,6 +247,7 @@ void estimateNewRTT(packet_t *packet) {
     long long unsigned int RTT_ms = getMicrotime(RTT);
 
     double new_SRTT_ms = (alpha * (double)SRTT_ms) + ((1 - alpha) * (double)RTT_ms);
+    //printf("Time: %f\n", new_SRTT_ms);
 
     SRTT.it_value.tv_sec = (new_SRTT_ms / (int)1e6);
     SRTT.it_value.tv_usec = ((int)new_SRTT_ms % (int)1e6);

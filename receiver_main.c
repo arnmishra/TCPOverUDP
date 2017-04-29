@@ -67,7 +67,7 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
             if (node->seq_num == temp->seq_num)
                 return;
 
-            if(node->seq_num < temp->seq_num && (temp->seq_num - RWS) < node->seq_num) //insert node before temp
+            if((node->seq_num < temp->seq_num && (temp->seq_num - RWS) < node->seq_num) || (node->seq_num - RWS) > temp->seq_num) //insert node before temp
             {
                 node->next = temp;
                 node->prev = temp->prev;
