@@ -286,9 +286,9 @@ void markPacketAsInactive(int cum_ack) {
         free(head->data);
         free(head);
         head = next;
-        PRINT(("markPacketAsInactive:\n"));
-        printPacketList();
-        PRINT(("====================\n"));
+        // PRINT(("markPacketAsInactive:\n"));
+        // printPacketList();
+        // PRINT(("====================\n"));
         if(head)
         {
         	head->prev = NULL;
@@ -597,7 +597,6 @@ int main(int argc, char** argv)
     pthread_mutex_unlock(&m);
 
 	// Done sending shit out, let the receiver know to stop
-    PRINT(("WAHAAAAAAA\n"));
 	char *buf = "F";
 	insert_data(buf, 0, 0, 3);
 	if ((numbytes = sendto(sockfd, buf, strlen(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
