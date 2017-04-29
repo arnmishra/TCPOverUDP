@@ -48,6 +48,10 @@ else: throw away
 send ack + seq_num
 **/
 
+        // Seq num: 5, NFE: 4, LFA: 7
+        // ack_num: 3, NFE: 4, LFA: 7
+        // Sending back: 35
+
 void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
 {
     data_t *node = malloc(sizeof(data_t));
@@ -73,6 +77,10 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
                 }
                 temp->prev = node;
                 inserted = 1;
+                if(temp == head)
+                {
+                    head = node;
+                }
                 break;
             }
             temp = temp->next;
@@ -186,6 +194,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         }
 
         memcpy(&seq_num, &buf[0], 1);
+
 
         int acknowledge_num;
         PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));

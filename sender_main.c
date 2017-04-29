@@ -196,6 +196,10 @@ void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
                 }
                 temp->prev = node;
                 inserted = true;
+                if(temp == head)
+                {
+                    head = node;
+                }
                 break;
             }
             temp = temp->next;
@@ -370,6 +374,7 @@ void *receiveAcknowledgements(void *ptr) {
     	    else if (last_seq_recv > cum_ack || last_seq_recv <= (cum_ack + 4) % NUM_SEQ_NUM)
     	    {
     	    	PRINT(("2 Received ack %d.%d\n", cum_ack, last_seq_recv));
+    	    	printPacketList();
     	    	packet_t *temp = head;
     	    	while (temp && temp->seq_num != last_seq_recv)
     			{
@@ -377,6 +382,7 @@ void *receiveAcknowledgements(void *ptr) {
     			}
     			if(temp)
     			{
+    				PRINT(("receiveAcknowledgements: Removing packet %d\n", temp->seq_num));
     				if(temp->prev)
     				{
     					temp->prev->next = temp->next;
@@ -386,15 +392,17 @@ void *receiveAcknowledgements(void *ptr) {
     					temp->next->prev = temp->prev;
     				}
     				estimateNewRTT(temp);
-                    PRINT(("receiveAcknowledgements: Removing packet %d\n", temp->seq_num));
                     printPacketList();
 
                     if (temp == head)
-                        head = NULL;
+                        head = temp->next;
+                    if (temp == tail)
+                    	tail = tail->prev;
 
     				free(temp->data);
     				free(temp);
     			}
+    			send_check = true;
                 pthread_cond_broadcast(&cv);
                 setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
     	    }
@@ -466,7 +474,6 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			// Update the window linked list
 			insert_data(buf, id, seq_num, bytesRead+1);
 
-			fflush(stdout);
 			PRINT(("Sending out packet (%d)\n", seq_num));
 
 			int numBytes;
