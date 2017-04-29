@@ -67,7 +67,7 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
             if (node->seq_num == temp->seq_num)
                 return;
 
-            if(node->seq_num < temp->seq_num && (temp->seq_num - 4) < node->seq_num) //insert node before temp
+            if(node->seq_num < temp->seq_num && (temp->seq_num - RWS) < node->seq_num) //insert node before temp
             {
                 node->next = temp;
                 node->prev = temp->prev;
@@ -199,7 +199,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         int acknowledge_num;
         PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
         // If inside the window
-        if((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + 4)) || (seq_num < (NFE-4) && seq_num <= LFA))
+        if((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + RWS)) || (seq_num < (NFE-RWS) && seq_num <= LFA))
         {
             if(seq_num == NFE) //if the next expected packet arrives
             {
@@ -240,7 +240,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         // If the sequence number is between cum_ack and cum_ack + RWS
         int end_cum_ack = (cum_ack + RWS) % NUM_SEQ_NUM;
         // if(!((seq_num >= cum_ack && (seq_num <= end_cum_ack || seq_num > end_cum_ack + 4)) || (seq_num < (cum_ack-4) && seq_num < end_cum_ack)))
-        if(!((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + 4)) || (seq_num < (NFE-4) && seq_num <= LFA)))
+        if(!((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + RWS)) || (seq_num < (NFE-RWS) && seq_num <= LFA)))
         {
             seq_num = cum_ack;
         }

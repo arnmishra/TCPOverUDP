@@ -186,7 +186,7 @@ void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
         packet_t *temp = head;
         while(temp)
         {
-            if(node->seq_num < temp->seq_num && (temp->seq_num - 4) < node->seq_num) //insert node before temp BUT gotta account for wrap of seq nums (i.e. 5 - 6 - 7 - 0)
+            if(node->seq_num < temp->seq_num && (temp->seq_num - SWS) < node->seq_num) //insert node before temp BUT gotta account for wrap of seq nums (i.e. 5 - 6 - 7 - 0)
             {
                 node->next = temp;
                 node->prev = temp->prev;
@@ -363,7 +363,7 @@ void *receiveAcknowledgements(void *ptr) {
 
             // If the cumulative ack is in the window
             // DON'T MOD THE LAR + 4 BECAUSE LAR = 6 AND CUM_ACK = 7 BREAKS IT
-    	    if ((cum_ack >= (LAR + 1) && (LAR + 4 >= cum_ack)) || cum_ack <= (LAR - 4)) {
+    	    if ((cum_ack >= (LAR + 1) && (LAR + SWS >= cum_ack)) || cum_ack <= (LAR - SWS)) {
     	    	PRINT(("1 Received ack %d.%d\n", cum_ack, last_seq_recv));
     	    	markPacketAsInactive(cum_ack);
                 send_check = true;
@@ -371,7 +371,7 @@ void *receiveAcknowledgements(void *ptr) {
                 setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
     	    }
             // If the select acknowledgement is later than the cumulative ack
-    	    else if (last_seq_recv > cum_ack || last_seq_recv <= (cum_ack + 4) % NUM_SEQ_NUM)
+    	    else if (last_seq_recv > cum_ack || last_seq_recv <= (cum_ack + SWS) % NUM_SEQ_NUM)
     	    {
     	    	PRINT(("2 Received ack %d.%d\n", cum_ack, last_seq_recv));
     	    	printPacketList();
