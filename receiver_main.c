@@ -187,7 +187,8 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
 
         int acknowledge_num;
         PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
-        if((seq_num >= NFE && seq_num <= LFA) || (seq_num <= NFE && seq_num >= LFA + 4))
+        // If inside the window
+        if((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + 4)) || (seq_num < (NFE-4) && seq_num < LFA))
         {
             if(seq_num == NFE) //if the next expected packet arrives
             {
@@ -223,9 +224,9 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         {
             cum_ack = NFE - 1;
         }
-        // If the sequence number is outside the window, set it equal to cum_ack
-        // if (next_expected_seq >= (LAR + 1) % NUM_SEQ_NUM || next_expected_seq < (LAR - 4)) {
-        if(!(seq_num <= (cum_ack + 4) % NUM_SEQ_NUM))
+        // If the sequence number is between cum_ack and cum_ack + RWS
+        int end_cum_ack = (cum_ack + RWS) % NUM_SEQ_NUM;
+        if(!((seq_num >= cum_ack && (seq_num <= end_cum_ack || seq_num > end_cum_ack + 4)) || (seq_num < (cum_ack-4) && seq_num < end_cum_ack)))
         {
             seq_num = cum_ack;
         }

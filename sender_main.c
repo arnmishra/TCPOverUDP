@@ -131,11 +131,11 @@ void *checkForTimeouts(void *ptr) {
             gettimeofday(&now, NULL);
 
             while (packet != NULL) {
-            	// PRINT(("Checking packet %d\n", packet->packet_id));
+            	PRINT(("Checking packet %d\n", packet->seq_num));
                 struct timeval diff;
                 timersub(&now, &packet->send_time, &diff);
                 if (timercmp(&diff, &RTT, >=)) {
-                    // PRINT(("Packet %d timed out! Resending all n buffers...\n", packet->packet_id));
+                    PRINT(("Packet %d timed out! Resending all n buffers...\n", packet->packet_id));
 
                     // Resend everything
                     while (packet != NULL) {
@@ -144,6 +144,7 @@ void *checkForTimeouts(void *ptr) {
     				        perror("sendto");
     				        exit(1);
     				    }
+                        gettimeofday(&packet->send_time, NULL);
     				    setitimer(ITIMER_REAL, &SRTT, NULL);
     				    packet = packet->next;
                     }
@@ -331,12 +332,14 @@ void *receiveAcknowledgements(void *ptr) {
 	    //PRINT(("next: %d, LAR: %d\n", next_expected_seq, LAR));
         pthread_mutex_lock(&m_packets);
 
+        // If next expected sequence is a new acknowledgment
 	    if (next_expected_seq >= (LAR + 1) % NUM_SEQ_NUM || next_expected_seq < (LAR - 4)) {
 	    	PRINT(("1 Received ack %d\n", next_expected_seq));
 	    	markPacketAsInactive(next_expected_seq);
             send_check = true;
             pthread_cond_broadcast(&cv);
 	    }
+        // If the last thing received is not
 	    else if (last_seq_recv > next_expected_seq)
 	    {
 	    	PRINT(("2 Received ack %d\n", last_seq_recv));
@@ -422,7 +425,7 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			insert_data(buf, id, seq_num, bytesRead+1);
 
 			fflush(stdout);
-			// PRINT(("Sending out packet (%d)\n", seq_num));
+			PRINT(("Sending out packet (%d)\n", seq_num));
 
 			int numBytes;
 			if ((numBytes = sendto(sockfd, buf, bytesRead+1, 0, p->ai_addr, p->ai_addrlen)) == -1) {
