@@ -20,7 +20,6 @@
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
-char seq_num;      // Sequence number
 char NFE = 0;       // Next frame Expected
 char LFA = 0;       // Last frame acceptable
 
@@ -49,10 +48,10 @@ else: throw away
 send ack + seq_num
 **/
 
-void insert_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count)
+void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
 {
     data_t *node = malloc(sizeof(data_t));
-    node->seq_num = seq_num;
+    node->seq_num = sequence_num;
     node->data = malloc(byte_count);
     memcpy(node->data, buf, byte_count);
     if(head)
@@ -101,14 +100,13 @@ void printPacketList() {
     PRINT(("\n"));
 }
 
-int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* output_file)
+int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FILE* output_file)
 {
-    printPacketList();
-    int final_seq_num = seq_num;
+    int final_seq_num = sequence_num;
     int num_nodes = 1;
     int malloc_bytes = (int)(byte_count);
     // PRINT(("Byte Count:%i\n", (int)(byte_count)));
-    if(head && head->seq_num == (seq_num+1) % NUM_SEQ_NUM)
+    if(head && head->seq_num == (sequence_num+1) % NUM_SEQ_NUM)
     {
         malloc_bytes += strlen(head->data);
         num_nodes++;
@@ -166,6 +164,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     char buf[MAX_PACKET_SIZE];
 
     FILE * output_file = fopen(destinationFile, "w+");
+    char seq_num;
 
     while(1)
     {
@@ -181,7 +180,6 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         }
 
         memcpy(&seq_num, &buf[0], 1);
-        // PRINT(("Sequence number: %u\n", seq_num));
 
         int acknowledge_num;
         PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
@@ -235,6 +233,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         sprintf(buffer, "%u%u", cum_ack, seq_num);
         PRINT(("Sending back: %s\n", buffer));
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
+        free(buffer);
     }
 
 }
@@ -246,7 +245,6 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-    seq_num = malloc(1);
     head = NULL;
     LFA = (NFE + RWS - 1) % NUM_SEQ_NUM;
 

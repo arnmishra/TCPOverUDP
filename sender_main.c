@@ -28,7 +28,6 @@ int sockfd;
 
 char LAR = -1;	// Last acknowledged frame
 char LFS = 0;	// Last frame sent
-char seq_num;	// Sequence number
 
 // RTT Estimation
 struct sigaction sa;
@@ -83,13 +82,6 @@ void SIGINT_handler(int val) {
 	pthread_mutex_destroy(&m);
     pthread_cond_destroy(&cv_timeout);
     pthread_mutex_destroy(&m_timeout);
-
-	// Free the linked list
-	while (head != NULL) {
-		packet_t *ptr = head->next;
-		free(head);
-		head = ptr;
-	}
 
     exit(1);
 }
@@ -151,6 +143,9 @@ void *checkForTimeouts(void *ptr) {
                     // Resend everything
                     while (packet != NULL) {
                     	PRINT(("Retransmitting packet (%d)\n", packet->seq_num));
+                        char bruh;
+                        memcpy(&bruh, &packet->data[0], 1);
+                        // PRINT(("FIRST BYTE = %d\n", bruh));
     					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
     				        perror("sendto");
     				        exit(1);
@@ -173,12 +168,13 @@ void *checkForTimeouts(void *ptr) {
 
 }
 
-void insert_data(char *buf, int packet_id, int seq_num, ssize_t byte_count)
+void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
 {
+    // PRINT(("INSERTING DATA... buflen = %zu\n", strlen(buf)));
 	pthread_mutex_lock(&m_packets);
 
     packet_t *node = malloc(sizeof(packet_t));
-    node->seq_num = seq_num;
+    node->seq_num = sequence_num;
     node->packet_id = packet_id;
     gettimeofday(&node->send_time, NULL);
     node->data = malloc(byte_count);
@@ -251,10 +247,10 @@ void estimateNewRTT(packet_t *packet) {
     SRTT.it_value.tv_usec = ((int)new_SRTT_ms % (int)1e6);
 
     SRTT_sleep.it_value.tv_sec = SRTT.it_value.tv_sec;
-    SRTT_sleep.it_value.tv_usec = (SRTT.it_value.tv_usec)*1.5;
+    SRTT_sleep.it_value.tv_usec = (SRTT.it_value.tv_usec) * 2;
 
-    PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
-    PRINT(("SRTT_sleep = %ld s and %06ld microseconds\n", SRTT_sleep.it_value.tv_sec, SRTT_sleep.it_value.tv_usec));
+    // PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
+    // PRINT(("SRTT_sleep = %ld s and %06ld microseconds\n", SRTT_sleep.it_value.tv_sec, SRTT_sleep.it_value.tv_usec));
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&SRTT_sleep.it_value, sizeof(SRTT_sleep.it_value)) < 0)
         error("setsockopt failed\n");
@@ -266,6 +262,8 @@ void estimateNewRTT(packet_t *packet) {
 void markPacketAsInactive(int cum_ack) {
 	packet_t *next;
 
+    printPacketList();
+
 	// PRINT(("Removing packet %d!\n", cum_ack));
 
     // Delete everything in the linked list up until (and including) cum_ack
@@ -273,11 +271,14 @@ void markPacketAsInactive(int cum_ack) {
     /////////////////
     while (head && !((cum_ack <= (head->seq_num) && (head->seq_num - SWS) < cum_ack)))
 	{
-		PRINT(("Removing packet %d\n", head->packet_id));
+		PRINT(("First: Removing packet %d\n", head->seq_num));
 		next = head->next;
         free(head->data);
         free(head);
         head = next;
+        // PRINT(("markPacketAsInactive:\n"));
+        // printPacketList();
+        // PRINT(("====================\n"));
         if(head)
         {
         	head->prev = NULL;
@@ -286,10 +287,9 @@ void markPacketAsInactive(int cum_ack) {
 		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
 
-	// PRINT(("Removing packet %d\n", head->packet_id));
-	if(head)
-	{
-        PRINT(("IN HERE\n"));
+    if(head)
+    {
+        PRINT(("Second: Removing packet %d\n", head->seq_num));
 		next = head->next;
 
         estimateNewRTT(head);
@@ -297,6 +297,9 @@ void markPacketAsInactive(int cum_ack) {
 		free(head->data);
 		free(head);
 		head = next;
+        // PRINT(("markPacketAsInactive:\n"));
+        // printPacketList();
+        // PRINT(("====================\n"));
 		if(head)
         {
         	head->prev = NULL;
@@ -344,18 +347,19 @@ void *receiveAcknowledgements(void *ptr) {
     	    //PRINT(("next: %d, LAR: %d\n", cum_ack, LAR));
             pthread_mutex_lock(&m_packets);
 
-            // If next expected sequence is a new acknowledgment
-    	    if (cum_ack >= (LAR + 1) % NUM_SEQ_NUM || cum_ack <= (LAR - 4)) {
-    	    	PRINT(("1 Received ack %d\n", cum_ack));
+            // If the cumulative ack is in the window
+            // DON'T MOD THE LAR + 4 BECAUSE LAR = 6 AND CUM_ACK = 7 BREAKS IT
+    	    if ((cum_ack >= (LAR + 1) && (LAR + 4 >= cum_ack)) || cum_ack <= (LAR - 4)) {
+    	    	PRINT(("1 Received ack %d.%d\n", cum_ack, last_seq_recv));
     	    	markPacketAsInactive(cum_ack);
                 send_check = true;
                 pthread_cond_broadcast(&cv);
                 setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
     	    }
-            // If the last thing received is not
+            // If the select acknowledgement is later than the cumulative ack
     	    else if (last_seq_recv > cum_ack || last_seq_recv <= (cum_ack + 4) % NUM_SEQ_NUM)
     	    {
-    	    	PRINT(("2 Received ack %d\n", last_seq_recv));
+    	    	PRINT(("2 Received ack %d.%d\n", cum_ack, last_seq_recv));
     	    	packet_t *temp = head;
     	    	while (temp && temp->seq_num != last_seq_recv)
     			{
@@ -372,9 +376,17 @@ void *receiveAcknowledgements(void *ptr) {
     					temp->next->prev = temp->prev;
     				}
     				estimateNewRTT(temp);
+                    // PRINT(("receiveAcknowledgements: Removing packet %d\n", temp->seq_num));
+                    // printPacketList();
+
+                    if (temp == head)
+                        head = NULL;
+
     				free(temp->data);
     				free(temp);
     			}
+                pthread_cond_broadcast(&cv);
+                setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
     	    }
             else {
                 PRINT(("Received random ack (%s)\n", buf));
@@ -413,6 +425,9 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 	int id = 0;
 	pthread_mutex_lock(&m);
     bool bruh = true;
+
+    char seq_num = 0;
+
 	while (bytesToTransfer > 0) {
 
 		// PRINT(("Any packets to send?\n"));
@@ -528,8 +543,6 @@ int main(int argc, char** argv)
 		return 2;
 	}
 
-    seq_num = 0;
-
     unsigned short int udpPort = (unsigned short int)atoi(portNum);
 	unsigned long long int numBytes = atoll(argv[4]);
 
@@ -574,6 +587,7 @@ int main(int argc, char** argv)
     pthread_mutex_unlock(&m);
 
 	// Done sending shit out, let the receiver know to stop
+    PRINT(("WAHAAAAAAA\n"));
 	char *buf = "F";
 	insert_data(buf, 0, 0, 3);
 	if ((numbytes = sendto(sockfd, buf, strlen(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
