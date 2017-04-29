@@ -183,8 +183,8 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         // PRINT(("Sequence number: %u\n", seq_num));
 
         int acknowledge_num;
-        PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
-        if((seq_num >= NFE && seq_num <= LFA % NUM_SEQ_NUM) || (seq_num <= NFE && seq_num >= (LFA % NUM_SEQ_NUM)))
+        // PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
+        if((seq_num >= NFE && seq_num <= LFA) || (seq_num <= NFE && seq_num >= LFA + 4))
         {
             if(seq_num == NFE) //if the next expected packet arrives
             {
@@ -238,7 +238,7 @@ int main(int argc, char** argv) {
 
     seq_num = malloc(1);
     head = NULL;
-    LFA = NFE + RWS - 1;
+    LFA = (NFE + RWS - 1) % NUM_SEQ_NUM;
 
     // signal(SIGINT, signalHandler);
 
