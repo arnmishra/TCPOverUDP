@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <signal.h>
 #include <netdb.h>
+#include <stdbool.h>
 
 #if 1
     #define PRINT(a) printf a
@@ -166,6 +167,8 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
 
     FILE * output_file = fopen(destinationFile, "w+");
 
+    bool first_packet = true;
+
     while(1)
     {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
@@ -183,7 +186,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         // PRINT(("Sequence number: %u\n", seq_num));
 
         int acknowledge_num;
-        // PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
+        PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
         if((seq_num >= NFE && seq_num <= LFA) || (seq_num <= NFE && seq_num >= LFA + 4))
         {
             if(seq_num == NFE) //if the next expected packet arrives
@@ -205,7 +208,10 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         else //if a packet that is not in the expected window arrives
         {
             acknowledge_num = NFE;
-            seq_num = NFE-1;
+            if (NFE == 0)
+                seq_num = 7;
+            else
+                seq_num = NFE-1;
         }
         char *buffer = malloc(2);
         unsigned char cum_ack;
@@ -217,7 +223,9 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         {
             cum_ack = NFE - 1;
         }
-        if(seq_num < cum_ack)
+        // If the sequence number is outside the window, set it equal to cum_ack
+        // if (next_expected_seq >= (LAR + 1) % NUM_SEQ_NUM || next_expected_seq < (LAR - 4)) {
+        if(!(seq_num <= (cum_ack + 4) % NUM_SEQ_NUM))
         {
             seq_num = cum_ack;
         }
@@ -225,6 +233,9 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         sprintf(buffer, "%u%u", cum_ack, seq_num);
         PRINT(("Sending back: %s\n", buffer));
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
+
+        if (first_packet)
+            first_packet = false;
     }
 
 }
