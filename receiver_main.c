@@ -9,7 +9,7 @@
 #include <netdb.h>
 #include <stdbool.h>
 
-#if 1
+#if 0
     #define PRINT(a) printf a
 #else
     #define PRINT(a) (void)0
@@ -185,9 +185,9 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
         // PRINT(("Received message of length %zi: %s\n", byte_count, buf+1));
 
-        if (buf[0] == 'F') {
+        if (buf[0] == 'F' && buf[1] == 'F') {
             char *buffer = malloc(4);
-            sprintf(buffer, "F");
+            sprintf(buffer, "FF");
             PRINT(("Sending back: %s\n", buffer));
             sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
             break;
@@ -220,18 +220,18 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         {
             acknowledge_num = NFE;
             if (NFE == 0)
-                seq_num = 7;
+                seq_num = NUM_SEQ_NUM - 1;
             else
                 seq_num = NFE-1;
         }
 
         PRINT(("ack_num: %d, NFE: %d, LFA: %d\n", acknowledge_num, NFE, LFA));
 
-        char *buffer = malloc(2);
+        char *buffer = malloc(10);
         char cum_ack;
         if(NFE == 0)
         {
-            cum_ack = 7;
+            cum_ack = NUM_SEQ_NUM - 1;
         }
         else
         {
@@ -245,7 +245,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
             seq_num = cum_ack;
         }
         // PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
-        sprintf(buffer, "%u%u", cum_ack, seq_num);
+        sprintf(buffer, "%u.%u", cum_ack, seq_num);
         PRINT(("Sending back: %s\n", buffer));
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
         free(buffer);

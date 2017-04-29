@@ -12,7 +12,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#if 1
+#if 0
     #define PRINT(a) printf a
 #else
     #define PRINT(a) (void)0
@@ -126,6 +126,7 @@ void *checkForTimeouts(void *ptr) {
         packet_t *packet = head;
 
         if (!packet) {
+            PRINT(("Waking up send thread!\n"));
             send_check = true;
             pthread_cond_broadcast(&cv);
         }
@@ -301,6 +302,9 @@ void markPacketAsInactive(int cum_ack) {
 		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
 
+    if (!head)
+        tail = NULL;
+
  //    if(head)
  //    {
  //        PRINT(("Second: Removing packet %d\n", head->seq_num));
@@ -338,26 +342,48 @@ void *receiveAcknowledgements(void *ptr) {
 	struct addrinfo *p = arg->p;
 
 	while (1) {
-		char buf[2];
+		char buf[10];
 	    ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, p->ai_addr, &p->ai_addrlen);
 
         if (byte_count > 0) {
-    	    char cum_ack;
-    	    memcpy(&cum_ack, &buf[0], 1);
+            buf[byte_count] = '\0';
 
-    	    if (cum_ack == 'F') {
-    	    	PRINT(("RECEIVED ACKNOWLEDGEMENT...\n"));
-    	    	PRINT(("ENDING PROGRAM...\n"));
-                // free(head->data);
-                // free(head);
-    	    	break;
-    	    }
+            if (buf[0] == 'F' && buf[1] == 'F') {
+                PRINT(("RECEIVED ACKNOWLEDGEMENT...\n"));
+                PRINT(("ENDING PROGRAM...\n"));
+                break;
+            }
 
+            char *token = buf;
+            char *end   = buf;
+
+            char cum_ack;
     	    char last_seq_recv;
-    	    memcpy(&last_seq_recv, &buf[1], 1);
 
-    	    cum_ack -= 48;
-            last_seq_recv -= 48;
+            // PRINT(("Buf = %s\n", buf));
+            // PRINT(("Buf len = %zu\n", strlen(buf)));
+            bool first = true;
+            while (token != NULL) {
+                strsep(&end, ".");
+
+                // PRINT(("token = %s\n", token));
+                // PRINT(("token atoi = %d\n", atoi(token)));
+
+                if (first) {
+                    // memcpy(&cum_ack, token, strlen(token));
+                    cum_ack = (char)atoi(token);
+                    first = false;
+                }
+                else
+                    last_seq_recv = (char)atoi(token);
+                    // memcpy(&last_seq_recv, token, strlen(token));
+
+                token = end;
+            }
+            // PRINT(("Check test ack %d.%d\n", cum_ack, last_seq_recv));
+
+    	    // cum_ack -= 48;
+         //    last_seq_recv -= 48;
     	    //PRINT(("next: %d, LAR: %d\n", cum_ack, LAR));
             pthread_mutex_lock(&m_packets);
 
@@ -446,11 +472,11 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 
     char seq_num = 0;
 
-	while (bytesToTransfer > 0) {
+	while (bytesToTransfer > 0 || head || tail) {
 
 		// PRINT(("Any packets to send?\n"));
-		// PRINT(("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS));
-		// printPacketList();
+		PRINT(("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS));
+		printPacketList();
 
 		while (( (seq_num > LAR && seq_num <= (LAR + SWS))  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
 			char buf[MAX_PACKET_SIZE];
@@ -502,16 +528,14 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			//PRINT(("bytes: %i\n", bytesToTransfer));
 		}
 		//PRINT(("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS));
-        if (bytesToTransfer == 0)
-            break;
 
 		// Conditional wait here until an ACK is received, or something timesOut
-		// PRINT(("rT: Sleeping with %lld to send...\n", bytesToTransfer));
         while (!send_check) {
+            PRINT(("rT: Sleeping with %lld to send...\n", bytesToTransfer));
             pthread_cond_wait(&cv, &m);
+            PRINT(("rT: Woken up!...\n"));
         }
         send_check = false;
-		// PRINT(("rT: Woken up!...\n"));
 	}
 	pthread_mutex_unlock(&m);
 
@@ -597,14 +621,16 @@ int main(int argc, char** argv)
 
     // Wait for the linked list to empty before sending finished packet
     pthread_mutex_lock(&m);
-    while (head) {
+    while (head || tail) {
         pthread_cond_wait(&cv, &m);
         // PRINT(("I'm DONE WAITING\n"));
     }
     pthread_mutex_unlock(&m);
 
+    PRINT(("Sending FINISHED\n"));
+
 	// Done sending shit out, let the receiver know to stop
-	char *buf = "F";
+	char *buf = "FF";
 	insert_data(buf, 0, 0, 3);
 	if ((numbytes = sendto(sockfd, buf, strlen(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		perror("SEND :(\n");
