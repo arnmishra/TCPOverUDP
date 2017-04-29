@@ -10,6 +10,7 @@
 #include <netdb.h>
 #include <pthread.h>
 #include <time.h>
+#include <sys/time.h>
 
 #if 1
     #define PRINT(a) printf a
@@ -29,9 +30,16 @@ char LAR = -1;	// Last acknowledged frame
 char LFS = 0;	// Last frame sent
 char seq_num;	// Sequence number
 
+// RTT Estimation
+struct sigaction sa;
+struct itimerval SRTT;
+struct timeval RTT;
+double alpha = 0.125;
+
 // Synchronization
 pthread_cond_t cv = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t m = PTHREAD_MUTEX_INITIALIZER;
+bool send_check = false;
 
 pthread_cond_t cv_timeout = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t m_timeout = PTHREAD_MUTEX_INITIALIZER;
@@ -47,7 +55,7 @@ typedef struct packet {
 	char seq_num;
 	char *data;
 	int num_bytes;
-	time_t send_time;
+	struct timeval send_time;
 	struct packet *next;
 	struct packet *prev;
 } packet_t;
@@ -115,24 +123,28 @@ void *checkForTimeouts(void *ptr) {
         packet_t *packet = head;
 
         if (!packet) {
+            send_check = true;
             pthread_cond_broadcast(&cv);
         }
         else {
-            time_t now = time(0);
+            struct timeval now;
+            gettimeofday(&now, NULL);
+
             while (packet != NULL) {
             	// PRINT(("Checking packet %d\n", packet->packet_id));
-                double diff = difftime(now, packet->send_time) * 1000; // x1000 for ms
-                if (diff > 100) {
+                struct timeval diff;
+                timersub(&now, &packet->send_time, &diff);
+                if (timercmp(&diff, &RTT, >=)) {
                     // PRINT(("Packet %d timed out! Resending all n buffers...\n", packet->packet_id));
 
                     // Resend everything
                     while (packet != NULL) {
-                    	// PRINT(("Retransmitting packet (%d)\n", packet->seq_num));
+                    	PRINT(("Retransmitting packet (%d)\n", packet->seq_num));
     					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
     				        perror("sendto");
     				        exit(1);
     				    }
-    				    alarm(1);
+    				    setitimer(ITIMER_REAL, &SRTT, NULL);
     				    packet = packet->next;
                     }
 
@@ -159,14 +171,14 @@ void printPacketList() {
 	PRINT(("\n"));
 }
 
-void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_t byte_count)
+void insert_data(char *buf, int packet_id, int seq_num, ssize_t byte_count)
 {
 	pthread_mutex_lock(&m_packets);
 
     packet_t *node = malloc(sizeof(packet_t));
     node->seq_num = seq_num;
     node->packet_id = packet_id;
-    node->send_time = send_time;
+    gettimeofday(&node->send_time, NULL);
     node->data = malloc(byte_count);
     node->num_bytes = byte_count;
     memcpy(node->data, buf, byte_count);
@@ -213,14 +225,36 @@ void insert_data(char *buf, int packet_id, int seq_num, time_t send_time, ssize_
     pthread_mutex_unlock(&m_packets);
 }
 
+/**
+ * Returns the current time in microseconds.
+ */
+long long unsigned int getMicrotime(struct timeval time){
+    return (time.tv_sec * (long long unsigned int)1000000) + (time.tv_usec);
+}
+
+void estimateNewRTT(packet_t *packet) {
+    struct timeval now;
+    gettimeofday(&now, NULL);
+
+    timersub(&now, &packet->send_time, &RTT);
+    RTT.tv_usec *= 2;
+    // PRINT(("RTT = %ld s and %06ld microseconds\n", RTT.tv_sec, RTT.tv_usec));
+
+    long long unsigned int SRTT_ms = getMicrotime(SRTT.it_value);
+    long long unsigned int RTT_ms = getMicrotime(RTT);
+
+    double new_SRTT_ms = (alpha * (double)SRTT_ms) + ((1 - alpha) * (double)RTT_ms);
+
+    SRTT.it_value.tv_sec = (new_SRTT_ms / (int)1e6);
+    SRTT.it_value.tv_usec = ((int)new_SRTT_ms % (int)1e6);
+
+    // PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
+}
+
 /*
  * Given an ack number, mark the packet as inactive in the window list
  */
 void markPacketAsInactive(int ack_num) {
-	pthread_mutex_lock(&m_packets);
-
-	
-
 	packet_t *next;
 
 	// PRINT(("Removing packet %d!\n", ack_num));
@@ -245,6 +279,9 @@ void markPacketAsInactive(int ack_num) {
 	if(head)
 	{
 		next = head->next;
+
+        estimateNewRTT(head);
+
 		free(head->data);
 		free(head);
 		head = next;
@@ -254,15 +291,13 @@ void markPacketAsInactive(int ack_num) {
         }
 		//LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
-	
+
 	LAR = ack_num;
-	
+
 
     // PRINT(("After removing...\n=========\n"));
     // printPacketList();
     // PRINT(("=========\n"));
-
-	pthread_mutex_unlock(&m_packets);
 }
 
 /*
@@ -294,9 +329,12 @@ void *receiveAcknowledgements(void *ptr) {
 	    last_seq_recv -= 48;
 	    next_expected_seq -= 48;
 	    //PRINT(("next: %d, LAR: %d\n", next_expected_seq, LAR));
+        pthread_mutex_lock(&m_packets);
+
 	    if (next_expected_seq >= (LAR + 1) % NUM_SEQ_NUM || next_expected_seq < (LAR - 4)) {
 	    	PRINT(("1 Received ack %d\n", next_expected_seq));
 	    	markPacketAsInactive(next_expected_seq);
+            send_check = true;
             pthread_cond_broadcast(&cv);
 	    }
 	    else if (last_seq_recv > next_expected_seq)
@@ -317,18 +355,20 @@ void *receiveAcknowledgements(void *ptr) {
 				{
 					temp->next->prev = temp->prev;
 				}
-				//estimateNewRTT(temp);
+				estimateNewRTT(temp);
 				free(temp->data);
 				free(temp);
 			}
-			
+	    }
+        else {
+            PRINT(("Received random ack (%s)\n", buf));
+        }
 
-	    }
-	    else {
-	    	PRINT(("Received random ack (%s)\n", buf));
-	    }
+        pthread_mutex_unlock(&m_packets);
 
 	}
+
+    PRINT(("ENDING\n"));
 
 	return NULL;
 }
@@ -352,6 +392,7 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 
 	int id = 0;
 	pthread_mutex_lock(&m);
+    bool bruh = true;
 	while (bytesToTransfer > 0) {
 
 		// PRINT(("Any packets to send?\n"));
@@ -378,10 +419,11 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 			memcpy(buf, &seq_num, 1);
 
 			// Update the window linked list
-			insert_data(buf, id, seq_num, time(0), bytesRead+1);
+			insert_data(buf, id, seq_num, bytesRead+1);
 
 			fflush(stdout);
 			// PRINT(("Sending out packet (%d)\n", seq_num));
+
 			int numBytes;
 			if ((numBytes = sendto(sockfd, buf, bytesRead+1, 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		        perror("sendto");
@@ -400,7 +442,7 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		    // {
 		    // 	seq_num = 2;
 		    // }
-		    alarm(1);
+		    setitimer(ITIMER_REAL, &SRTT, NULL);
 
 			seq_num = (seq_num + 1) % NUM_SEQ_NUM;
 
@@ -413,7 +455,10 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 
 		// Conditional wait here until an ACK is received, or something timesOut
 		// PRINT(("rT: Sleeping with %lld to send...\n", bytesToTransfer));
-		pthread_cond_wait(&cv, &m);
+        while (!send_check) {
+            pthread_cond_wait(&cv, &m);
+        }
+        send_check = false;
 		// PRINT(("rT: Woken up!...\n"));
 	}
 	pthread_mutex_unlock(&m);
@@ -428,7 +473,7 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	signal(SIGINT, SIGINT_handler);
-	signal(SIGALRM, awakenTimeoutThread);
+	// signal(SIGALRM, awakenTimeoutThread);
 
 	char *hostname = argv[1];
 	char *portNum  = argv[2];
@@ -483,16 +528,39 @@ int main(int argc, char** argv)
         exit(1);
     }
 
+    // Initialize SRTT(0) to 1 second
+    SRTT.it_value.tv_sec = 1;
+    SRTT.it_value.tv_usec = 0;
+    SRTT.it_interval.tv_sec = 0;
+    SRTT.it_interval.tv_usec = 0;
+    // Initialize RTT(0) = 0.5 second
+    RTT = (struct timeval){0};
+    RTT.tv_usec = 50000;
+    // Create signal handler
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = &awakenTimeoutThread;
+    sigaction(SIGALRM, &sa, NULL);
+
 	reliablyTransfer(hostname, udpPort, filename, numBytes, p);
+
+    // printPacketList();
+
+    // Wait for the linked list to empty before sending finished packet
+    pthread_mutex_lock(&m);
+    while (head) {
+        pthread_cond_wait(&cv, &m);
+        // PRINT(("I'm DONE WAITING\n"));
+    }
+    pthread_mutex_unlock(&m);
 
 	// Done sending shit out, let the receiver know to stop
 	char *buf = "F";
-	insert_data(buf, 0, 0, time(0), 3);
+	insert_data(buf, 0, 0, 3);
 	if ((numbytes = sendto(sockfd, buf, strlen(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
 		perror("SEND :(\n");
 		exit(1);
 	}
-	alarm(1);
+	setitimer(ITIMER_REAL, &SRTT, NULL);
 
 	void *result;
 	pthread_join(ack_id, &result);
