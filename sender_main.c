@@ -33,6 +33,7 @@ char seq_num;	// Sequence number
 // RTT Estimation
 struct sigaction sa;
 struct itimerval SRTT;
+struct itimerval SRTT_sleep;
 struct timeval RTT;
 double alpha = 0.125;
 
@@ -93,6 +94,15 @@ void SIGINT_handler(int val) {
     exit(1);
 }
 
+void printPacketList() {
+    packet_t *node = head;
+    while (node != NULL) {
+        PRINT(("%d -- ", node->seq_num));
+        node = node->next;
+    }
+    PRINT(("\n"));
+}
+
 void awakenTimeoutThread(int val) {
     pthread_mutex_lock(&m_timeout);
     timeout_check = true;
@@ -115,7 +125,8 @@ void *checkForTimeouts(void *ptr) {
         timeout_check = false;
         pthread_mutex_unlock(&m_timeout);
 
-        // PRINT(("Checking for timeouts...\n"));
+        PRINT(("Checking for timeouts...\n"));
+        printPacketList();
 
 
         // Iterate through all packets checking for timeouts
@@ -131,11 +142,11 @@ void *checkForTimeouts(void *ptr) {
             gettimeofday(&now, NULL);
 
             while (packet != NULL) {
-            	PRINT(("Checking packet %d\n", packet->seq_num));
+            	// PRINT(("Checking packet %d\n", packet->seq_num));
                 struct timeval diff;
                 timersub(&now, &packet->send_time, &diff);
-                if (timercmp(&diff, &RTT, >=)) {
-                    PRINT(("Packet %d timed out! Resending all n buffers...\n", packet->packet_id));
+                if (timercmp(&diff, &SRTT.it_value, >=)) {
+                    PRINT(("Packet %d timed out! Resending all n buffers...\n", packet->seq_num));
 
                     // Resend everything
                     while (packet != NULL) {
@@ -145,7 +156,7 @@ void *checkForTimeouts(void *ptr) {
     				        exit(1);
     				    }
                         gettimeofday(&packet->send_time, NULL);
-    				    setitimer(ITIMER_REAL, &SRTT, NULL);
+    				    setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
     				    packet = packet->next;
                     }
 
@@ -160,16 +171,6 @@ void *checkForTimeouts(void *ptr) {
         pthread_mutex_unlock(&m_packets);
     }
 
-}
-
-
-void printPacketList() {
-	packet_t *node = head;
-	while (node != NULL) {
-		PRINT(("%d -- ", node->seq_num));
-		node = node->next;
-	}
-	PRINT(("\n"));
 }
 
 void insert_data(char *buf, int packet_id, int seq_num, ssize_t byte_count)
@@ -249,21 +250,30 @@ void estimateNewRTT(packet_t *packet) {
     SRTT.it_value.tv_sec = (new_SRTT_ms / (int)1e6);
     SRTT.it_value.tv_usec = ((int)new_SRTT_ms % (int)1e6);
 
-    // PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
+    SRTT_sleep.it_value.tv_sec = SRTT.it_value.tv_sec;
+    SRTT_sleep.it_value.tv_usec = (SRTT.it_value.tv_usec)*1.5;
+
+    PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
+    PRINT(("SRTT_sleep = %ld s and %06ld microseconds\n", SRTT_sleep.it_value.tv_sec, SRTT_sleep.it_value.tv_usec));
+
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&SRTT_sleep.it_value, sizeof(SRTT_sleep.it_value)) < 0)
+        error("setsockopt failed\n");
 }
 
 /*
  * Given an ack number, mark the packet as inactive in the window list
  */
-void markPacketAsInactive(int ack_num) {
+void markPacketAsInactive(int cum_ack) {
 	packet_t *next;
 
-	// PRINT(("Removing packet %d!\n", ack_num));
+	// PRINT(("Removing packet %d!\n", cum_ack));
 
-	while ((ack_num <= (LAR + 1) % NUM_SEQ_NUM && ack_num > LAR + 4) && head)
-		//node->seq_num < temp->seq_num && (temp->seq_num - 4) < node->seq_num
+    // Delete everything in the linked list up until (and including) cum_ack
+    // Essentially, delete head until seq_num >= cum_ack
+    /////////////////
+    while (head && !((cum_ack <= (head->seq_num) && (head->seq_num - SWS) < cum_ack)))
 	{
-		// PRINT(("Removing packet %d\n", head->packet_id));
+		PRINT(("Removing packet %d\n", head->packet_id));
 		next = head->next;
         free(head->data);
         free(head);
@@ -272,13 +282,14 @@ void markPacketAsInactive(int ack_num) {
         {
         	head->prev = NULL;
         }
-		//PRINT(("enter\n"));
-		//LAR = (LAR + 1) % NUM_SEQ_NUM;
+		// PRINT(("enter\n"));
+		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
 
 	// PRINT(("Removing packet %d\n", head->packet_id));
 	if(head)
 	{
+        PRINT(("IN HERE\n"));
 		next = head->next;
 
         estimateNewRTT(head);
@@ -293,7 +304,7 @@ void markPacketAsInactive(int ack_num) {
 		//LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
 
-	LAR = ack_num;
+	LAR = cum_ack;
 
 
     // PRINT(("After removing...\n=========\n"));
@@ -313,61 +324,67 @@ void *receiveAcknowledgements(void *ptr) {
 		char buf[2];
 	    ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, p->ai_addr, &p->ai_addrlen);
 
-	    char next_expected_seq;
-	    memcpy(&next_expected_seq, &buf[0], 1);
+        if (byte_count > 0) {
+    	    char cum_ack;
+    	    memcpy(&cum_ack, &buf[0], 1);
 
-	    if (next_expected_seq == 'F') {
-	    	PRINT(("RECEIVED ACKNOWLEDGEMENT...\n"));
-	    	PRINT(("ENDING PROGRAM...\n"));
-            // free(head->data);
-            // free(head);
-	    	break;
-	    }
+    	    if (cum_ack == 'F') {
+    	    	PRINT(("RECEIVED ACKNOWLEDGEMENT...\n"));
+    	    	PRINT(("ENDING PROGRAM...\n"));
+                // free(head->data);
+                // free(head);
+    	    	break;
+    	    }
 
-	    char last_seq_recv;
-	    memcpy(&last_seq_recv, &buf[1], 1);
+    	    char last_seq_recv;
+    	    memcpy(&last_seq_recv, &buf[1], 1);
 
-	    last_seq_recv -= 48;
-	    next_expected_seq -= 48;
-	    //PRINT(("next: %d, LAR: %d\n", next_expected_seq, LAR));
-        pthread_mutex_lock(&m_packets);
+    	    cum_ack -= 48;
+            last_seq_recv -= 48;
+    	    //PRINT(("next: %d, LAR: %d\n", cum_ack, LAR));
+            pthread_mutex_lock(&m_packets);
 
-        // If next expected sequence is a new acknowledgment
-	    if (next_expected_seq >= (LAR + 1) % NUM_SEQ_NUM || next_expected_seq < (LAR - 4)) {
-	    	PRINT(("1 Received ack %d\n", next_expected_seq));
-	    	markPacketAsInactive(next_expected_seq);
-            send_check = true;
-            pthread_cond_broadcast(&cv);
-	    }
-        // If the last thing received is not
-	    else if (last_seq_recv > next_expected_seq)
-	    {
-	    	PRINT(("2 Received ack %d\n", last_seq_recv));
-	    	packet_t *temp = head;
-	    	while (temp && temp->seq_num != last_seq_recv)
-			{
-				temp = temp->next;
-			}
-			if(temp)
-			{
-				if(temp->prev)
-				{
-					temp->prev->next = temp->next;
-				}
-				if(temp->next)
-				{
-					temp->next->prev = temp->prev;
-				}
-				estimateNewRTT(temp);
-				free(temp->data);
-				free(temp);
-			}
-	    }
-        else {
-            PRINT(("Received random ack (%s)\n", buf));
+            // If next expected sequence is a new acknowledgment
+    	    if (cum_ack >= (LAR + 1) % NUM_SEQ_NUM || cum_ack <= (LAR - 4)) {
+    	    	PRINT(("1 Received ack %d\n", cum_ack));
+    	    	markPacketAsInactive(cum_ack);
+                send_check = true;
+                pthread_cond_broadcast(&cv);
+                setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
+    	    }
+            // If the last thing received is not
+    	    else if (last_seq_recv > cum_ack || last_seq_recv <= (cum_ack + 4) % NUM_SEQ_NUM)
+    	    {
+    	    	PRINT(("2 Received ack %d\n", last_seq_recv));
+    	    	packet_t *temp = head;
+    	    	while (temp && temp->seq_num != last_seq_recv)
+    			{
+    				temp = temp->next;
+    			}
+    			if(temp)
+    			{
+    				if(temp->prev)
+    				{
+    					temp->prev->next = temp->next;
+    				}
+    				if(temp->next)
+    				{
+    					temp->next->prev = temp->prev;
+    				}
+    				estimateNewRTT(temp);
+    				free(temp->data);
+    				free(temp);
+    			}
+    	    }
+            else {
+                PRINT(("Received random ack (%s)\n", buf));
+            }
+
+            pthread_mutex_unlock(&m_packets);
         }
-
-        pthread_mutex_unlock(&m_packets);
+        else {
+            awakenTimeoutThread(0);
+        }
 
 	}
 
@@ -445,7 +462,7 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 		    // {
 		    // 	seq_num = 2;
 		    // }
-		    setitimer(ITIMER_REAL, &SRTT, NULL);
+		    setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
 
 			seq_num = (seq_num + 1) % NUM_SEQ_NUM;
 
@@ -563,7 +580,7 @@ int main(int argc, char** argv)
 		perror("SEND :(\n");
 		exit(1);
 	}
-	setitimer(ITIMER_REAL, &SRTT, NULL);
+	setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
 
 	void *result;
 	pthread_join(ack_id, &result);
