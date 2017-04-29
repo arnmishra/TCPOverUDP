@@ -70,7 +70,9 @@ void insert_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count)
                 }
                 temp->prev = node;
                 inserted = 1;
+                break;
             }
+            temp = temp->next;
         }
         if(!inserted) //insert node at tail
         {
@@ -89,8 +91,18 @@ void insert_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count)
     }
 }
 
+void printPacketList() {
+    data_t *node = head;
+    while (node != NULL) {
+        PRINT(("%d -- ", node->seq_num));
+        node = node->next;
+    }
+    PRINT(("\n"));
+}
+
 int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* output_file)
 {
+    // printPacketList();
     int final_seq_num = seq_num;
     int num_nodes = 1;
     int malloc_bytes = (int)(byte_count);
@@ -99,14 +111,15 @@ int write_data(char buf[MAX_DATA_SIZE], int seq_num, ssize_t byte_count, FILE* o
     {
         malloc_bytes += strlen(head->data);
         num_nodes++;
-        data_t *temp = head;
+        data_t *temp = head->next;
         final_seq_num = head->seq_num;
-        while(temp->next && temp->next->seq_num == temp->seq_num+1)
+        while(temp && temp->seq_num == final_seq_num+1)
         {
-            malloc_bytes += strlen(temp->next->data);
+            malloc_bytes += strlen(temp->data);
             num_nodes++;
             final_seq_num = temp->seq_num;
             temp = temp->next;
+            // PRINT(("final_seq_num = %d\n", final_seq_num));
         }
     }
     char * batch_write = malloc(malloc_bytes);
@@ -158,9 +171,6 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
         // PRINT(("Received message of length %zi: %s\n", byte_count, buf+1));
 
-        // if (seq_num == 4)
-        //     sleep(5);
-
         if (buf[0] == 'F') {
             char *buffer = malloc(4);
             sprintf(buffer, "F");
@@ -173,7 +183,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         // PRINT(("Sequence number: %u\n", seq_num));
 
         int acknowledge_num;
-        // PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
+        PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
         if((seq_num >= NFE && seq_num <= LFA % NUM_SEQ_NUM) || (seq_num <= NFE && seq_num >= (LFA % NUM_SEQ_NUM)))
         {
             if(seq_num == NFE) //if the next expected packet arrives
@@ -182,13 +192,13 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
                 //LFA = (LFA + 1) % NUM_SEQ_NUM;
                 // PRINT(("writing\n"));
                 acknowledge_num = write_data(buf+1, seq_num, byte_count-1, output_file);
+                // PRINT(("ack_num = %d\n", acknowledge_num));
                 NFE = (acknowledge_num + 1) % NUM_SEQ_NUM;
-                LFA = NFE + RWS - 1;
+                LFA = (NFE + RWS - 1) % NUM_SEQ_NUM;
             }
             else //if a packet later than the next expected arrives
             {
                 acknowledge_num = NFE - 1;
-                // PRINT(("inserting\n"));
                 insert_data(buf+1, seq_num, byte_count-1);
             }
         }
@@ -211,6 +221,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         {
             seq_num = cum_ack;
         }
+        // PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
         sprintf(buffer, "%u%u", cum_ack, seq_num);
         PRINT(("Sending back: %s\n", buffer));
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
