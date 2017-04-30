@@ -12,7 +12,7 @@
 #include <time.h>
 #include <sys/time.h>
 
-#if 0
+#if 1
     #define PRINT(a) printf a
 #else
     #define PRINT(a) (void)0
@@ -21,7 +21,7 @@
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
-#define SWS 4
+#define SWS 10
 #define NUM_SEQ_NUM (2 * SWS)
 
 int sockfd;
@@ -146,11 +146,12 @@ void *checkForTimeouts(void *ptr) {
                     	PRINT(("Retransmitting packet (%d)\n", packet->seq_num));
                         char bruh;
                         memcpy(&bruh, &packet->data[0], 1);
-                        // PRINT(("FIRST BYTE = %d\n", bruh));
+                        PRINT(("FIRST BYTE = %d\n", bruh));
     					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
     				        perror("sendto");
     				        exit(1);
     				    }
+    				    PRINT(("sent\n"));
                         gettimeofday(&packet->send_time, NULL);
     				    setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
     				    packet = packet->next;
