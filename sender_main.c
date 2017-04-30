@@ -21,7 +21,7 @@
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
-int SWS = 10;
+int SWS = 60;
 #define NUM_SEQ_NUM (2 * SWS)
 
 int sockfd;
@@ -233,19 +233,19 @@ long long unsigned int getMicrotime(struct timeval time){
 }
 
 void estimateNewRTT(packet_t *packet) {
-    PRINT(("Entering estimateNewRTT...\n"));
+    // PRINT(("Entering estimateNewRTT...\n"));
     struct timeval now;
     gettimeofday(&now, NULL);
 
     timersub(&now, &packet->send_time, &RTT);
     RTT.tv_usec *= 2;
-    PRINT(("RTT = %ld s and %06ld microseconds\n", RTT.tv_sec, RTT.tv_usec));
+    // PRINT(("RTT = %ld s and %06ld microseconds\n", RTT.tv_sec, RTT.tv_usec));
 
     long long unsigned int SRTT_ms = getMicrotime(SRTT.it_value);
     long long unsigned int RTT_ms = getMicrotime(RTT);
 
     double new_SRTT_ms = (alpha * (double)SRTT_ms) + ((1 - alpha) * (double)RTT_ms);
-    printf("Time: %f\n", new_SRTT_ms);
+    // printf("Time: %f\n", new_SRTT_ms);
 
     SRTT.it_value.tv_sec = (new_SRTT_ms / (int)1e6);
     SRTT.it_value.tv_usec = ((int)new_SRTT_ms % (int)1e6);
@@ -253,14 +253,14 @@ void estimateNewRTT(packet_t *packet) {
     SRTT_sleep.it_value.tv_sec = SRTT.it_value.tv_sec;
     SRTT_sleep.it_value.tv_usec = (SRTT.it_value.tv_usec) * 2;
 
-    PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
-    PRINT(("SRTT_sleep = %ld s and %06ld microseconds\n", SRTT_sleep.it_value.tv_sec, SRTT_sleep.it_value.tv_usec));
+    // PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
+    // PRINT(("SRTT_sleep = %ld s and %06ld microseconds\n", SRTT_sleep.it_value.tv_sec, SRTT_sleep.it_value.tv_usec));
 
     if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &SRTT_sleep.it_value, sizeof(SRTT_sleep.it_value)) < 0) {
         perror("setsockopt");
     }
 
-    PRINT(("Leaving estimateNewRTT\n"));
+    // PRINT(("Leaving estimateNewRTT\n"));
 }
 
 /*
@@ -282,7 +282,7 @@ void markPacketAsInactive(int cum_ack) {
 
     // head + SWS > cum_ack
 
-    PRINT(("Entering markPacketAsInactive\n"));
+    // PRINT(("Entering markPacketAsInactive\n"));
 	packet_t *next;
     while (head && ((head->seq_num <= cum_ack && (head->seq_num + SWS) > cum_ack) || (head->seq_num - SWS) > cum_ack))
 	{
@@ -311,9 +311,9 @@ void markPacketAsInactive(int cum_ack) {
 
 	LAR = cum_ack;
 
-    PRINT(("After removing...\n=========\n"));
-    printPacketList();
-    PRINT(("=========\n"));
+    // PRINT(("After removing...\n=========\n"));
+    // printPacketList();
+    // PRINT(("=========\n"));
 }
 
 /*
@@ -375,7 +375,6 @@ void *receiveAcknowledgements(void *ptr) {
     	    if ((cum_ack >= (LAR + 1) && (LAR + SWS >= cum_ack)) || cum_ack <= (LAR - SWS)) {
     	    	PRINT(("1 Received ack %d.%d\n", cum_ack, last_seq_recv));
     	    	markPacketAsInactive(cum_ack);
-                PRINT(("After\n"));
                 send_check = true;
                 pthread_cond_broadcast(&cv);
                 setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
@@ -613,12 +612,16 @@ int main(int argc, char** argv)
     PRINT(("Sending FINISHED\n"));
 
 	// Done sending shit out, let the receiver know to stop
-	char *buf = "FF";
-	insert_data(buf, 0, 0, 3);
-	if ((numbytes = sendto(sockfd, buf, strlen(buf), 0, p->ai_addr, p->ai_addrlen)) == -1) {
-		perror("SEND :(\n");
-		exit(1);
-	}
+	char val = -1;
+    char buf[2];
+    buf[0] = val;
+    buf[1] = val;
+    // char *buf = "FF";
+    insert_data(buf, 0, 0, 2);
+    if ((numbytes = sendto(sockfd, buf, 2, 0, p->ai_addr, p->ai_addrlen)) == -1) {
+        perror("SEND :(\n");
+        exit(1);
+    }
 	setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
 
 	void *result;

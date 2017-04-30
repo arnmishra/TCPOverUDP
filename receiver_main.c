@@ -15,7 +15,7 @@
     #define PRINT(a) (void)0
 #endif
 
-int RWS = 10;
+int RWS = 60;
 #define NUM_SEQ_NUM (2 * RWS)
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
@@ -219,7 +219,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
         // PRINT(("Received message of length %zi: %s\n", byte_count, buf+1));
-        if (buf[0] == 'F' && buf[1] == 'F')
+        if (buf[0] == -1 && buf[1] == -1)
             break;
 
         memcpy(&seq_num, &buf[0], 1);
