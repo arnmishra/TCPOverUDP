@@ -21,7 +21,7 @@
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
-#define SWS 10
+int SWS = 10;
 #define NUM_SEQ_NUM (2 * SWS)
 
 int sockfd;
@@ -73,7 +73,7 @@ typedef struct thread {
 	int id;
 } thread_t;
 
-void SIGINT_handler(int val) {
+void SIGINT_handler() {
 	PRINT(("Closing...\n"));
 
 	close(sockfd);
@@ -95,7 +95,7 @@ void printPacketList() {
     PRINT(("\n"));
 }
 
-void awakenTimeoutThread(int val) {
+void awakenTimeoutThread() {
     pthread_mutex_lock(&m_timeout);
     timeout_check = true;
     pthread_cond_signal(&cv_timeout);
@@ -104,7 +104,6 @@ void awakenTimeoutThread(int val) {
 
 void *checkForTimeouts(void *ptr) {
 	thread_arg_t *arg = ptr;
-	unsigned short int udpPort = arg->udpPort;
 	struct addrinfo *p = arg->p;
 
     while (true) {
@@ -139,13 +138,13 @@ void *checkForTimeouts(void *ptr) {
                 struct timeval diff;
                 timersub(&now, &packet->send_time, &diff);
                 if (timercmp(&diff, &SRTT.it_value, >=)) {
-                    PRINT(("Packet %d timed out! Resending all n buffers...\n", packet->seq_num));
+                    // PRINT(("Packet %d timed out! Resending all n buffers...\n", packet->seq_num));
 
                     // Resend everything
                     while (packet != NULL) {
                     	PRINT(("Retransmitting packet (%d)\n", packet->seq_num));
-                        char bruh;
-                        memcpy(&bruh, &packet->data[0], 1);
+                        // char bruh;
+                        // memcpy(&bruh, &packet->data[0], 1);
                         // PRINT(("FIRST BYTE = %d\n", bruh));
     					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
     				        perror("sendto");
@@ -155,8 +154,6 @@ void *checkForTimeouts(void *ptr) {
     				    setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
     				    packet = packet->next;
                     }
-
-                    // pthread_cond_signal(&cv);
                     break;
                 }
                 else
@@ -236,18 +233,19 @@ long long unsigned int getMicrotime(struct timeval time){
 }
 
 void estimateNewRTT(packet_t *packet) {
+    PRINT(("Entering estimateNewRTT...\n"));
     struct timeval now;
     gettimeofday(&now, NULL);
 
     timersub(&now, &packet->send_time, &RTT);
     RTT.tv_usec *= 2;
-    // PRINT(("RTT = %ld s and %06ld microseconds\n", RTT.tv_sec, RTT.tv_usec));
+    PRINT(("RTT = %ld s and %06ld microseconds\n", RTT.tv_sec, RTT.tv_usec));
 
     long long unsigned int SRTT_ms = getMicrotime(SRTT.it_value);
     long long unsigned int RTT_ms = getMicrotime(RTT);
 
     double new_SRTT_ms = (alpha * (double)SRTT_ms) + ((1 - alpha) * (double)RTT_ms);
-    //printf("Time: %f\n", new_SRTT_ms);
+    printf("Time: %f\n", new_SRTT_ms);
 
     SRTT.it_value.tv_sec = (new_SRTT_ms / (int)1e6);
     SRTT.it_value.tv_usec = ((int)new_SRTT_ms % (int)1e6);
@@ -255,22 +253,24 @@ void estimateNewRTT(packet_t *packet) {
     SRTT_sleep.it_value.tv_sec = SRTT.it_value.tv_sec;
     SRTT_sleep.it_value.tv_usec = (SRTT.it_value.tv_usec) * 2;
 
-    // PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
-    // PRINT(("SRTT_sleep = %ld s and %06ld microseconds\n", SRTT_sleep.it_value.tv_sec, SRTT_sleep.it_value.tv_usec));
+    PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
+    PRINT(("SRTT_sleep = %ld s and %06ld microseconds\n", SRTT_sleep.it_value.tv_sec, SRTT_sleep.it_value.tv_usec));
 
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&SRTT_sleep.it_value, sizeof(SRTT_sleep.it_value)) < 0)
-        error("setsockopt failed\n");
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &SRTT_sleep.it_value, sizeof(SRTT_sleep.it_value)) < 0) {
+        perror("setsockopt");
+    }
+
+    PRINT(("Leaving estimateNewRTT\n"));
 }
 
 /*
  * Given an ack number, mark the packet as inactive in the window list
  */
 void markPacketAsInactive(int cum_ack) {
-	packet_t *next;
 
     // printPacketList();
 
-	// PRINT(("Removing packet %d!\n", cum_ack));
+    // PRINT(("Removing packet %d!\n", cum_ack));
 
     // Delete everything in the linked list up until (and including) cum_ack
     // Essentially, delete head until seq_num >= cum_ack
@@ -282,6 +282,8 @@ void markPacketAsInactive(int cum_ack) {
 
     // head + SWS > cum_ack
 
+    PRINT(("Entering markPacketAsInactive\n"));
+	packet_t *next;
     while (head && ((head->seq_num <= cum_ack && (head->seq_num + SWS) > cum_ack) || (head->seq_num - SWS) > cum_ack))
 	{
         if (head->seq_num == cum_ack)
@@ -302,15 +304,16 @@ void markPacketAsInactive(int cum_ack) {
 		// PRINT(("enter\n"));
 		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
+    // PRINT(("After the while loop\n"));
 
     if (!head)
         tail = NULL;
 
 	LAR = cum_ack;
 
-    // PRINT(("After removing...\n=========\n"));
-    // printPacketList();
-    // PRINT(("=========\n"));
+    PRINT(("After removing...\n=========\n"));
+    printPacketList();
+    PRINT(("=========\n"));
 }
 
 /*
@@ -318,7 +321,7 @@ void markPacketAsInactive(int cum_ack) {
  */
 void *receiveAcknowledgements(void *ptr) {
 	thread_arg_t *arg = ptr;
-	unsigned short int udpPort = arg->udpPort;
+	// unsigned short int udpPort = arg->udpPort;
 	struct addrinfo *p = arg->p;
 
 	while (1) {
@@ -372,6 +375,7 @@ void *receiveAcknowledgements(void *ptr) {
     	    if ((cum_ack >= (LAR + 1) && (LAR + SWS >= cum_ack)) || cum_ack <= (LAR - SWS)) {
     	    	PRINT(("1 Received ack %d.%d\n", cum_ack, last_seq_recv));
     	    	markPacketAsInactive(cum_ack);
+                PRINT(("After\n"));
                 send_check = true;
                 pthread_cond_broadcast(&cv);
                 setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
@@ -419,7 +423,7 @@ void *receiveAcknowledgements(void *ptr) {
             pthread_mutex_unlock(&m_packets);
         }
         else {
-            awakenTimeoutThread(0);
+            awakenTimeoutThread();
         }
 
 	}
@@ -438,7 +442,7 @@ void *receiveAcknowledgements(void *ptr) {
 // add seq_num to start of message
 // increment seq_num (w/ mod)
 // send
-void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* filename, unsigned long long int bytesToTransfer, struct addrinfo *p) {
+void reliablyTransfer(char* filename, unsigned long long int bytesToTransfer, struct addrinfo *p) {
 	FILE *f = fopen(filename, "rb");
 
 	if (f == NULL) {
@@ -448,7 +452,6 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 
 	int id = 0;
 	pthread_mutex_lock(&m);
-    bool bruh = true;
 
     char seq_num = 0;
 
@@ -595,7 +598,7 @@ int main(int argc, char** argv)
     sa.sa_handler = &awakenTimeoutThread;
     sigaction(SIGALRM, &sa, NULL);
 
-	reliablyTransfer(hostname, udpPort, filename, numBytes, p);
+	reliablyTransfer(filename, numBytes, p);
 
     // printPacketList();
 
@@ -623,6 +626,8 @@ int main(int argc, char** argv)
 	pthread_cancel(timeout_id);
 
     freeaddrinfo(servinfo);
+
+    return 0;
 }
 
 /**

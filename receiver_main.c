@@ -15,7 +15,7 @@
     #define PRINT(a) (void)0
 #endif
 
-#define RWS 10
+int RWS = 10;
 #define NUM_SEQ_NUM (2 * RWS)
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
@@ -209,7 +209,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         exit(1);
     }
     struct sockaddr_storage addr;
-    int addrlen = sizeof(addr);
+    socklen_t addrlen = sizeof(addr);
     char buf[MAX_PACKET_SIZE];
 
     FILE * output_file = fopen(destinationFile, "w+");
@@ -219,13 +219,8 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
         // PRINT(("Received message of length %zi: %s\n", byte_count, buf+1));
-        if (buf[0] == 'F' && buf[1] == 'F') {
-            char *buffer = malloc(4);
-            sprintf(buffer, "FF");
-            PRINT(("Sending back: %s\n", buffer));
-            sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
+        if (buf[0] == 'F' && buf[1] == 'F')
             break;
-        }
 
         memcpy(&seq_num, &buf[0], 1);
 
@@ -271,7 +266,6 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
             cum_ack = NFE - 1;
         }
         // If the sequence number is between cum_ack and cum_ack + RWS
-        int end_cum_ack = (cum_ack + RWS) % NUM_SEQ_NUM;
         // if(!((seq_num >= cum_ack && (seq_num <= end_cum_ack || seq_num > end_cum_ack + 4)) || (seq_num < (cum_ack-4) && seq_num < end_cum_ack)))
         if(!((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + RWS)) || (seq_num < (NFE-RWS) && seq_num <= LFA)))
         {
@@ -284,6 +278,11 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         free(buffer);
     }
 
+    // Send back ACK
+    char *buffer = malloc(4);
+    sprintf(buffer, "FF");
+    PRINT(("Sending back: %s\n", buffer));
+    sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
 }
 
 int main(int argc, char** argv) {
@@ -302,6 +301,8 @@ int main(int argc, char** argv) {
     // udpPort = (unsigned short int)atoi(argv[1]);
 
     reliablyReceive(argv[1], argv[2]);
+
+    return 0;
 }
 
 /**
