@@ -9,7 +9,7 @@
 #include <netdb.h>
 #include <stdbool.h>
 
-#if 0
+#if 1
     #define PRINT(a) printf a
 #else
     #define PRINT(a) (void)0
@@ -25,6 +25,7 @@ char LFA = 0;       // Last frame acceptable
 
 typedef struct data {
     int seq_num;
+    int length;
     char *data;
     struct data *next;
     struct data *prev;
@@ -57,7 +58,12 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
     data_t *node = malloc(sizeof(data_t));
     node->seq_num = sequence_num;
     node->data = malloc(byte_count);
+    node->length = byte_count;
     memcpy(node->data, buf, byte_count);
+    // PRINT(("==============\n"));
+    // PRINT(("byte_count: %lu\n", byte_count));
+    // PRINT(("strlen: %lu\n", strlen(node->data)));
+    // PRINT(("==============\n"));
     if(head)
     {
         int inserted = 0;
@@ -113,38 +119,45 @@ void printPacketList() {
 
 int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FILE* output_file)
 {
-    PRINT(("write_data:\n"));
-    printPacketList();
-    PRINT(("===========\n"));
+    // PRINT(("write_data:\n"));
+    // printPacketList();
+    // PRINT(("===========\n"));
     int final_seq_num = sequence_num;
     int num_nodes = 1;
+    // PRINT(("===========\n"));
     int malloc_bytes = (int)(byte_count);
+    // PRINT(("malloc_bytes: %i\n", malloc_bytes));
     // PRINT(("Byte Count:%i\n", (int)(byte_count)));
     if(head && head->seq_num == (sequence_num+1) % NUM_SEQ_NUM)
     {
-        malloc_bytes += strlen(head->data);
+        malloc_bytes += head->length;
+        // PRINT(("malloc_bytes: %i\n", malloc_bytes));
         num_nodes++;
         data_t *temp = head->next;
         final_seq_num = head->seq_num;
         while(temp && temp->seq_num == (final_seq_num+1) % NUM_SEQ_NUM)
         {
-            malloc_bytes += strlen(temp->data);
+            malloc_bytes += temp->length;
+            // PRINT(("malloc_bytes: %i\n", malloc_bytes));
             num_nodes++;
             final_seq_num = temp->seq_num;
             temp = temp->next;
-            PRINT(("final_seq_num = %d\n", final_seq_num));
+            // PRINT(("final_seq_num = %d\n", final_seq_num));
         }
     }
     char * batch_write = malloc(malloc_bytes);
     memcpy(batch_write, buf, byte_count);
     int i = 1;
     int num_bytes = (int)(byte_count);
+    
+    // PRINT(("malloc_bytes: %i\n", malloc_bytes));
+    // PRINT(("===========\n"));
     if(num_nodes > 1)
     {
         while(i < num_nodes)
         {
-            memcpy(batch_write+num_bytes, head->data, strlen(head->data));
-            num_bytes += strlen(head->data);
+            memcpy(batch_write+num_bytes, head->data, head->length);
+            num_bytes += head->length;
             i++;
             data_t *next = head->next;
             free(head->data);
@@ -197,7 +210,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
 
 
         int acknowledge_num;
-        PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
+        //PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
         // If inside the window
         if((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + RWS)) || (seq_num < (NFE-RWS) && seq_num <= LFA))
         {
@@ -225,7 +238,7 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
                 seq_num = NFE-1;
         }
 
-        PRINT(("ack_num: %d, NFE: %d, LFA: %d\n", acknowledge_num, NFE, LFA));
+        //PRINT(("ack_num: %d, NFE: %d, LFA: %d\n", acknowledge_num, NFE, LFA));
 
         char *buffer = malloc(10);
         char cum_ack;
