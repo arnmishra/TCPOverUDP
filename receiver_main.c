@@ -73,9 +73,17 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
     // PRINT(("byte_count: %lu\n", byte_count));
     // PRINT(("strlen: %lu\n", strlen(node->data)));
     // PRINT(("==============\n"));
+
+    // PRINT(("Inserting packet %d\n", sequence_num));
+
     if(head)
     {
-        PRINT(("head: %d\n", head->seq_num));
+        // PRINT(("head: %d\n", head->seq_num));
+        // if (head->next)
+        //     PRINT(("head->next = %d\n", head->next->seq_num));
+        // if (head->prev)
+        //     PRINT(("head->prev = %d\n", head->prev->seq_num));
+
         // printPacketList();
         int inserted = 0;
         data_t *temp = head;
@@ -84,8 +92,15 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
             if (node->seq_num == temp->seq_num)
                 return;
 
+            // PRINT(("temp seq_num: %i\n", temp->seq_num));
             if((node->seq_num < temp->seq_num && (temp->seq_num - RWS) < node->seq_num) || (node->seq_num - RWS) > temp->seq_num) //insert node before temp
             {
+                // PRINT(("Inserting new packet %d before existing packet %d\n", node->seq_num, temp->seq_num));
+                // if (temp->next)
+                //     PRINT(("Temp->next = %d\n", temp->next->seq_num));
+                // if (temp->prev)
+                //     PRINT(("Temp->prev = %d\n", temp->prev->seq_num));
+
                 node->next = temp;
                 node->prev = temp->prev;
                 if(temp->prev)
@@ -95,12 +110,13 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
                 temp->prev = node;
                 inserted = 1;
                 if(temp == head)
-                {
                     head = node;
-                }
+                // if (node->next)
+                //     PRINT(("Node->next = %d\n", node->next->seq_num));
+                // if (node->prev)
+                //     PRINT(("Node->prev = %d\n", node->prev->seq_num));
                 break;
             }
-            PRINT(("temp seq_num: %i\n", temp->seq_num));
             temp = temp->next;
         }
         if(!inserted) //insert node at tail
@@ -153,7 +169,7 @@ int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FI
     memcpy(batch_write, buf, byte_count);
     int i = 1;
     int num_bytes = (int)(byte_count);
-    
+
     // PRINT(("malloc_bytes: %i\n", malloc_bytes));
     // PRINT(("===========\n"));
     if(num_nodes > 1)
@@ -164,6 +180,8 @@ int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FI
             num_bytes += head->length;
             i++;
             data_t *next = head->next;
+            if (next)
+                next->prev = NULL;
             free(head->data);
             free(head);
             head = next;
@@ -199,10 +217,8 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
 
     while(1)
     {
-        PRINT(("hi\n"));
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
         // PRINT(("Received message of length %zi: %s\n", byte_count, buf+1));
-        PRINT(("Before Break\n"));
         if (buf[0] == 'F' && buf[1] == 'F') {
             char *buffer = malloc(4);
             sprintf(buffer, "FF");
@@ -223,18 +239,14 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
             {
                 //NFE = (NFE + 1) % NUM_SEQ_NUM;
                 //LFA = (LFA + 1) % NUM_SEQ_NUM;
-                PRINT(("writing\n"));
                 acknowledge_num = write_data(buf+1, seq_num, byte_count-1, output_file);
-                PRINT(("done writing\n"));
                 NFE = (acknowledge_num + 1) % NUM_SEQ_NUM;
                 LFA = (NFE + RWS - 1) % NUM_SEQ_NUM;
             }
             else //if a packet later than the next expected arrives
             {
                 acknowledge_num = NFE - 1;
-                PRINT(("Inserting\n"));
                 insert_data(buf+1, seq_num, byte_count-1);
-                PRINT(("done inserting\n"));
             }
         }
         else //if a packet that is not in the expected window arrives

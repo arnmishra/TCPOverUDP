@@ -118,7 +118,7 @@ void *checkForTimeouts(void *ptr) {
         pthread_mutex_unlock(&m_timeout);
 
         PRINT(("Checking for timeouts...\n"));
-        printPacketList();
+        // printPacketList();
 
 
         // Iterate through all packets checking for timeouts
@@ -126,7 +126,7 @@ void *checkForTimeouts(void *ptr) {
         packet_t *packet = head;
 
         if (!packet) {
-            PRINT(("Waking up send thread!\n"));
+            // PRINT(("Waking up send thread!\n"));
             send_check = true;
             pthread_cond_broadcast(&cv);
         }
@@ -146,12 +146,11 @@ void *checkForTimeouts(void *ptr) {
                     	PRINT(("Retransmitting packet (%d)\n", packet->seq_num));
                         char bruh;
                         memcpy(&bruh, &packet->data[0], 1);
-                        PRINT(("FIRST BYTE = %d\n", bruh));
+                        // PRINT(("FIRST BYTE = %d\n", bruh));
     					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
     				        perror("sendto");
     				        exit(1);
     				    }
-    				    PRINT(("sent\n"));
                         gettimeofday(&packet->send_time, NULL);
     				    setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
     				    packet = packet->next;
@@ -288,7 +287,7 @@ void markPacketAsInactive(int cum_ack) {
         if (head->seq_num == cum_ack)
             estimateNewRTT(head);
 
-		PRINT(("Removing packet %d\n", head->seq_num));
+		// PRINT(("Removing packet %d\n", head->seq_num));
 		next = head->next;
         free(head->data);
         free(head);
@@ -307,28 +306,7 @@ void markPacketAsInactive(int cum_ack) {
     if (!head)
         tail = NULL;
 
- //    if(head)
- //    {
- //        PRINT(("Second: Removing packet %d\n", head->seq_num));
-	// 	next = head->next;
-
- //        estimateNewRTT(head);
-
-	// 	free(head->data);
-	// 	free(head);
-	// 	head = next;
- //        // PRINT(("markPacketAsInactive:\n"));
- //        // printPacketList();
- //        // PRINT(("====================\n"));
-	// 	if(head)
- //        {
- //        	head->prev = NULL;
- //        }
-	// 	//LAR = (LAR + 1) % NUM_SEQ_NUM;
-	// }
-
 	LAR = cum_ack;
-
 
     // PRINT(("After removing...\n=========\n"));
     // printPacketList();
@@ -402,7 +380,7 @@ void *receiveAcknowledgements(void *ptr) {
     	    else if (last_seq_recv > cum_ack || last_seq_recv <= (cum_ack + SWS) % NUM_SEQ_NUM)
     	    {
     	    	PRINT(("2 Received ack %d.%d\n", cum_ack, last_seq_recv));
-    	    	printPacketList();
+    	    	// printPacketList();
     	    	packet_t *temp = head;
     	    	while (temp && temp->seq_num != last_seq_recv)
     			{
@@ -420,7 +398,7 @@ void *receiveAcknowledgements(void *ptr) {
     					temp->next->prev = temp->prev;
     				}
     				estimateNewRTT(temp);
-                    printPacketList();
+                    // printPacketList();
 
                     if (temp == head)
                         head = temp->next;
@@ -477,8 +455,8 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 	while (bytesToTransfer > 0 || head || tail) {
 
 		// PRINT(("Any packets to send?\n"));
-		PRINT(("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS));
-		printPacketList();
+		// PRINT(("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS));
+		// printPacketList();
 
 		while (( (seq_num > LAR && seq_num <= (LAR + SWS))  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
 			char buf[MAX_PACKET_SIZE];
@@ -533,9 +511,9 @@ void reliablyTransfer(char* hostname, unsigned short int hostUDPport, char* file
 
 		// Conditional wait here until an ACK is received, or something timesOut
         while (!send_check) {
-            PRINT(("rT: Sleeping with %lld to send...\n", bytesToTransfer));
+            // PRINT(("rT: Sleeping with %lld to send...\n", bytesToTransfer));
             pthread_cond_wait(&cv, &m);
-            PRINT(("rT: Woken up!...\n"));
+            // PRINT(("rT: Woken up!...\n"));
         }
         send_check = false;
 	}
