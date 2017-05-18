@@ -1,3 +1,13 @@
+/**
+FILENAME: receiver_main.c
+
+DESCRIPTION: Receiver for TCP Connection built over UDP protocol.
+
+AUTHORS:
+    Arnav Mishra
+    Samir Chaudhry
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,20 +19,16 @@
 #include <netdb.h>
 #include <stdbool.h>
 
-#if 1
-    #define PRINT(a) printf a
-#else
-    #define PRINT(a) (void)0
-#endif
 
-int RWS = 60;
 #define NUM_SEQ_NUM (2 * RWS)
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
 
+int RWS = 60;       // Receive Window Size
 char NFE = 0;       // Next frame Expected
 char LFA = 0;       // Last frame acceptable
 
+// Store the packets that have been arrived in order to write to file
 typedef struct data {
     int seq_num;
     int length;
@@ -33,34 +39,16 @@ typedef struct data {
 data_t *head;
 data_t *tail;
 
-
-// void signalHandler(int val) {
-//  PRINT(("Closing...\n"));
-//  close(udpPort);
-//     exit(1);
-// }
-
-
 /**
-receive message
-get the sequence number
-if seq_num==expected: increment expected and write to file
-else: throw away
-send ack + seq_num
-**/
+Function: insert_data
 
-        // Seq num: 5, NFE: 4, LFA: 7
-        // ack_num: 3, NFE: 4, LFA: 7
-        // Sending back: 35
+Purpose: Insert new data that is received into the linked list
 
-void printPacketList() {
-    data_t *node = head;
-    while (node != NULL) {
-        PRINT(("%d -- ", node->seq_num));
-        node = node->next;
-    }
-    PRINT(("\n"));
-}
+Parameters:
+    buf -- The buffer that has been received from the sender.
+    sequence_num -- The Sequence Number of this buffer (used to insert in order).
+    byte_count -- The number of bytes in this buffer.
+*/
 void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
 {
     data_t *node = malloc(sizeof(data_t));
@@ -69,38 +57,18 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
     node->length = byte_count;
     memcpy(node->data, buf, byte_count);
 
-    // PRINT(("==============\n"));
-    // PRINT(("byte_count: %lu\n", byte_count));
-    // PRINT(("strlen: %lu\n", strlen(node->data)));
-    // PRINT(("==============\n"));
-
-    // PRINT(("Inserting packet %d\n", sequence_num));
-
     if(head)
     {
-        // PRINT(("head: %d\n", head->seq_num));
-        // if (head->next)
-        //     PRINT(("head->next = %d\n", head->next->seq_num));
-        // if (head->prev)
-        //     PRINT(("head->prev = %d\n", head->prev->seq_num));
-
-        // printPacketList();
         int inserted = 0;
         data_t *temp = head;
         while(temp)
         {
+            // Don't insert duplicate entries.
             if (node->seq_num == temp->seq_num)
                 return;
-
-            // PRINT(("temp seq_num: %i\n", temp->seq_num));
-            if((node->seq_num < temp->seq_num && (temp->seq_num - RWS) < node->seq_num) || (node->seq_num - RWS) > temp->seq_num) //insert node before temp
+            // Insert Node Before Temp.
+            if((node->seq_num < temp->seq_num && (temp->seq_num - RWS) < node->seq_num) || (node->seq_num - RWS) > temp->seq_num)
             {
-                // PRINT(("Inserting new packet %d before existing packet %d\n", node->seq_num, temp->seq_num));
-                // if (temp->next)
-                //     PRINT(("Temp->next = %d\n", temp->next->seq_num));
-                // if (temp->prev)
-                //     PRINT(("Temp->prev = %d\n", temp->prev->seq_num));
-
                 node->next = temp;
                 node->prev = temp->prev;
                 if(temp->prev)
@@ -111,15 +79,12 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
                 inserted = 1;
                 if(temp == head)
                     head = node;
-                // if (node->next)
-                //     PRINT(("Node->next = %d\n", node->next->seq_num));
-                // if (node->prev)
-                //     PRINT(("Node->prev = %d\n", node->prev->seq_num));
                 break;
             }
             temp = temp->next;
         }
-        if(!inserted) //insert node at tail
+        // Insert Node at tail.
+        if(!inserted)
         {
             tail->next = node;
             node->prev = tail;
@@ -127,7 +92,8 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
             tail = node;
         }
     }
-    else //if head isn't initialized, initialize it
+    // Insert into empty list.
+    else
     {
         head = node;
         head->next = NULL;
@@ -136,33 +102,37 @@ void insert_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count)
     }
 }
 
+/**
+Function: write_data
 
+Purpose: Write consecutive data to the output file.
+
+Parameters:
+    buf -- The buffer that has been received from the sender.
+    sequence_num -- The Sequence Number of this buffer (used to insert in order).
+    byte_count -- The number of bytes in this buffer.
+    output_file -- The file to which the content should be written.
+
+Returns: Last ack that was written to the file. 
+*/
 int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FILE* output_file)
 {
-    // PRINT(("write_data:\n"));
-    // printPacketList();
-    // PRINT(("===========\n"));
     int final_seq_num = sequence_num;
     int num_nodes = 1;
-    // PRINT(("===========\n"));
     int malloc_bytes = (int)(byte_count);
-    // PRINT(("malloc_bytes: %i\n", malloc_bytes));
-    // PRINT(("Byte Count:%i\n", (int)(byte_count)));
+
     if(head && head->seq_num == (sequence_num+1) % NUM_SEQ_NUM)
     {
         malloc_bytes += head->length;
-        // PRINT(("malloc_bytes: %i\n", malloc_bytes));
         num_nodes++;
         data_t *temp = head->next;
         final_seq_num = head->seq_num;
         while(temp && temp->seq_num == (final_seq_num+1) % NUM_SEQ_NUM)
         {
             malloc_bytes += temp->length;
-            // PRINT(("malloc_bytes: %i\n", malloc_bytes));
             num_nodes++;
             final_seq_num = temp->seq_num;
             temp = temp->next;
-            // PRINT(("final_seq_num = %d\n", final_seq_num));
         }
     }
     char * batch_write = malloc(malloc_bytes);
@@ -170,8 +140,6 @@ int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FI
     int i = 1;
     int num_bytes = (int)(byte_count);
 
-    // PRINT(("malloc_bytes: %i\n", malloc_bytes));
-    // PRINT(("===========\n"));
     if(num_nodes > 1)
     {
         while(i < num_nodes)
@@ -187,13 +155,24 @@ int write_data(char buf[MAX_DATA_SIZE], int sequence_num, ssize_t byte_count, FI
             head = next;
         }
     }
-    // PRINT(("Writing: %i\n", num_bytes));
-    fwrite(batch_write, 1, num_bytes, output_file); // Skip the sequence number and write the rest
+    fwrite(batch_write, 1, num_bytes, output_file);
     fflush(output_file);
     return final_seq_num;
 }
 
-void reliablyReceive(char * myUDPport, char* destinationFile) {
+/**
+Function: reliably_receive
+
+Purpose: Receive data from the sender. If the next expected data is received, write it directly
+    to the file. If data is received out of order, insert it into the linked list. Send back an
+    acknowledgement of the last consecutive packet that has been received and the packet number
+    that was just received.
+
+Parameters:
+    myUDPport -- The port on which to receive data from the sender.
+    destinationFile -- The file to which the data will be written when received.
+*/
+void reliably_receive(char * myUDPport, char* destinationFile) {
     struct addrinfo hints, *result;
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET; // INET for IPv4
@@ -218,33 +197,31 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
     while(1)
     {
         ssize_t byte_count = recvfrom(sockfd, buf, sizeof(buf), 0, (struct sockaddr *)&addr, &addrlen);
-        // PRINT(("Received message of length %zi: %s\n", byte_count, buf+1));
         if (buf[0] == -1 && buf[1] == -1)
             break;
 
         memcpy(&seq_num, &buf[0], 1);
 
-
         int acknowledge_num;
-        PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
-        // If inside the window
+        // For data that is received inside the expected window.
         if((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + RWS)) || (seq_num < (NFE-RWS) && seq_num <= LFA))
         {
-            if(seq_num == NFE) //if the next expected packet arrives
+            // If the next expected packet arrives, write the data.
+            if(seq_num == NFE)
             {
-                //NFE = (NFE + 1) % NUM_SEQ_NUM;
-                //LFA = (LFA + 1) % NUM_SEQ_NUM;
                 acknowledge_num = write_data(buf+1, seq_num, byte_count-1, output_file);
                 NFE = (acknowledge_num + 1) % NUM_SEQ_NUM;
                 LFA = (NFE + RWS - 1) % NUM_SEQ_NUM;
             }
-            else //if a packet later than the next expected arrives
+            //If a later packet arrives, insert the data into the linked list. 
+            else
             {
                 acknowledge_num = NFE - 1;
                 insert_data(buf+1, seq_num, byte_count-1);
             }
         }
-        else //if a packet that is not in the expected window arrives
+        // If a packet outside the expected window arrives, ignore the data. 
+        else
         {
             acknowledge_num = NFE;
             if (NFE == 0)
@@ -252,8 +229,6 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
             else
                 seq_num = NFE-1;
         }
-
-        //PRINT(("ack_num: %d, NFE: %d, LFA: %d\n", acknowledge_num, NFE, LFA));
 
         char *buffer = malloc(10);
         char cum_ack;
@@ -265,50 +240,45 @@ void reliablyReceive(char * myUDPport, char* destinationFile) {
         {
             cum_ack = NFE - 1;
         }
-        // If the sequence number is between cum_ack and cum_ack + RWS
-        // if(!((seq_num >= cum_ack && (seq_num <= end_cum_ack || seq_num > end_cum_ack + 4)) || (seq_num < (cum_ack-4) && seq_num < end_cum_ack)))
+        // If the sequence number is between cum_ack and cum_ack + RWS.
         if(!((seq_num >= NFE && (seq_num <= LFA || seq_num > LFA + RWS)) || (seq_num < (NFE-RWS) && seq_num <= LFA)))
         {
             seq_num = cum_ack;
         }
-        // PRINT(("Seq num: %d, NFE: %d, LFA: %d\n", seq_num, NFE, LFA));
         sprintf(buffer, "%u.%u", cum_ack, seq_num);
-        PRINT(("Sending back: %s\n", buffer));
+        printf("Sending back: %s\n", buffer);
         sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
         free(buffer);
     }
 
-    // Send back ACK
+    // Send back acknowledgment.
     char *buffer = malloc(4);
     sprintf(buffer, "FF");
-    PRINT(("Sending back: %s\n", buffer));
+    printf("Sending back: %s\n", buffer);
     sendto(sockfd, buffer, strlen(buffer), 0, (struct sockaddr *)&addr, addrlen);
 }
 
+/**
+Function: main
+
+Purpose: Main function to verify arguments are received and start the receiver.
+
+Parameters:
+    argc -- Number of arguments passed into the program.
+    argv -- List of arguments that are passed in.
+
+Returns: 0 for successful completion.
+*/
 int main(int argc, char** argv) {
     if (argc != 3)
     {
-        PRINT(("usage: %s UDP_port filename_to_write\n\n", argv[0]));
+        printf("usage: %s UDP_port filename_to_write\n\n", argv[0]);
         exit(1);
     }
 
     head = NULL;
     LFA = (NFE + RWS - 1) % NUM_SEQ_NUM;
-
-    // signal(SIGINT, signalHandler);
-
-    // unsigned short int udpPort;
-    // udpPort = (unsigned short int)atoi(argv[1]);
-
-    reliablyReceive(argv[1], argv[2]);
+    reliably_receive(argv[1], argv[2]);
 
     return 0;
 }
-
-/**
-receive message
-get the sequence number
-if seq_num==expected: increment expected and write to file
-else: throw away
-send ack + seq_num
-**/
