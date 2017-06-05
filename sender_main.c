@@ -1,3 +1,13 @@
+/**
+FILENAME: sender_main.c
+
+DESCRIPTION: Sender for TCP Connection built over UDP protocol.
+
+AUTHORS:
+    Arnav Mishra
+    Samir Chaudhry
+*/
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -11,12 +21,6 @@
 #include <pthread.h>
 #include <time.h>
 #include <sys/time.h>
-
-#if 1
-    #define PRINT(a) printf a
-#else
-    #define PRINT(a) (void)0
-#endif
 
 #define MAX_PACKET_SIZE 1472
 #define MAX_DATA_SIZE 1471 // 1472B payload - 1B for sequence number
@@ -48,7 +52,6 @@ bool timeout_check = false;
 pthread_cond_t cv_packets = PTHREAD_COND_INITIALIZER;
 pthread_mutex_t m_packets = PTHREAD_MUTEX_INITIALIZER;
 
-// NOT USED YET
 // Store the last packets sent in the window (if resend needed)
 typedef struct packet {
 	int packet_id;
@@ -73,6 +76,11 @@ typedef struct thread {
 	int id;
 } thread_t;
 
+/**
+Function: SIGINT_handler
+
+Purpose: Signal Handler for SIGINT that destroys the condition variables and mutexes.
+*/
 void SIGINT_handler() {
 	PRINT(("Closing...\n"));
 
@@ -86,15 +94,11 @@ void SIGINT_handler() {
     exit(1);
 }
 
-void printPacketList() {
-    packet_t *node = head;
-    while (node != NULL) {
-        PRINT(("%d -- ", node->seq_num));
-        node = node->next;
-    }
-    PRINT(("\n"));
-}
+/**
+Function: awakenTimeoutThread
 
+Purpose: Function to signal the timeout thread to wake it up and resend relevant packets.
+*/
 void awakenTimeoutThread() {
     pthread_mutex_lock(&m_timeout);
     timeout_check = true;
@@ -102,12 +106,20 @@ void awakenTimeoutThread() {
     pthread_mutex_unlock(&m_timeout);
 }
 
+/**
+Function: checkForTimeouts
+
+Purpose: Check for timeouts in the linked list to resend relevant packets.
+
+Parameters:
+    ptr -- UDP Port and address information of what receiver to resend data to. 
+*/
 void *checkForTimeouts(void *ptr) {
 	thread_arg_t *arg = ptr;
 	struct addrinfo *p = arg->p;
 
     while (true) {
-        // Sleep until SIGALRM sets timeout_check flag
+        // Sleep until SIGALRM sets timeout_check flag.
         pthread_mutex_lock(&m_timeout);
         while (!timeout_check) {
             pthread_cond_wait(&cv_timeout, &m_timeout);
@@ -116,16 +128,13 @@ void *checkForTimeouts(void *ptr) {
         timeout_check = false;
         pthread_mutex_unlock(&m_timeout);
 
-        PRINT(("Checking for timeouts...\n"));
-        // printPacketList();
+        printf("Checking for timeouts...\n");
 
-
-        // Iterate through all packets checking for timeouts
+        // Iterate through all packets checking for timeouts.
         pthread_mutex_lock(&m_packets);
         packet_t *packet = head;
 
         if (!packet) {
-            // PRINT(("Waking up send thread!\n"));
             send_check = true;
             pthread_cond_broadcast(&cv);
         }
@@ -134,18 +143,10 @@ void *checkForTimeouts(void *ptr) {
             gettimeofday(&now, NULL);
 
             while (packet != NULL) {
-            	// PRINT(("Checking packet %d\n", packet->seq_num));
                 struct timeval diff;
                 timersub(&now, &packet->send_time, &diff);
                 if (timercmp(&diff, &SRTT.it_value, >=)) {
-                    // PRINT(("Packet %d timed out! Resending all n buffers...\n", packet->seq_num));
-
-                    // Resend everything
                     while (packet != NULL) {
-                    	PRINT(("Retransmitting packet (%d)\n", packet->seq_num));
-                        // char bruh;
-                        // memcpy(&bruh, &packet->data[0], 1);
-                        // PRINT(("FIRST BYTE = %d\n", bruh));
     					if ((sendto(sockfd, packet->data, packet->num_bytes, 0, p->ai_addr, p->ai_addrlen)) == -1) {
     				        perror("sendto");
     				        exit(1);
@@ -156,8 +157,11 @@ void *checkForTimeouts(void *ptr) {
                     }
                     break;
                 }
+                // Keep resending till a packet that is not timed out since everything after that packet cannot be timed out yet.
                 else
-                    break;  // All packets after this one are newer anyway
+                {
+                    break;
+                }
                 packet = packet->next;
             }
         }
@@ -166,9 +170,19 @@ void *checkForTimeouts(void *ptr) {
 
 }
 
+/**
+Function: insert_data
+
+Purpose: Insert new data that is received into the linked list
+
+Parameters:
+    buf -- The buffer that has been received from the sender.
+    packet_id -- ID of the packet that was sent out. 
+    sequence_num -- The Sequence Number of this buffer (used to insert in order).
+    byte_count -- The number of bytes in this buffer.
+*/
 void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
 {
-    // PRINT(("INSERTING DATA... buflen = %zu\n", strlen(buf)));
 	pthread_mutex_lock(&m_packets);
 
     packet_t *node = malloc(sizeof(packet_t));
@@ -184,7 +198,8 @@ void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
         packet_t *temp = head;
         while(temp)
         {
-            if(node->seq_num < temp->seq_num && (temp->seq_num - SWS) < node->seq_num) //insert node before temp BUT gotta account for wrap of seq nums (i.e. 5 - 6 - 7 - 0)
+            // Insert Node Before Temp.
+            if(node->seq_num < temp->seq_num && (temp->seq_num - SWS) < node->seq_num)
             {
                 node->next = temp;
                 node->prev = temp->prev;
@@ -202,7 +217,8 @@ void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
             }
             temp = temp->next;
         }
-        if(!inserted) //insert node at tail
+        // Insert Node at tail.
+        if(!inserted)
         {
             tail->next = node;
             node->prev = tail;
@@ -210,7 +226,8 @@ void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
             tail = node;
         }
     }
-    else //if head isn't initialized, initialize it
+    // Insert into empty list.
+    else
     {
         head = node;
         head->next = NULL;
@@ -218,34 +235,43 @@ void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
         tail = head;
     }
 
-    // PRINT(("After inserting packet %d\n===============\n", packet_id));
-    // printPacketList();
-    // PRINT(("==============\n"));
-
     pthread_mutex_unlock(&m_packets);
 }
 
 /**
- * Returns the current time in microseconds.
- */
+Function: getMicrotime
+
+Purpose: Function to get the current time in microseconds.
+
+Parameters:
+    time -- The current time in a timeval struct.
+
+Returns: Time in microseconds. 
+*/
 long long unsigned int getMicrotime(struct timeval time){
     return (time.tv_sec * (long long unsigned int)1000000) + (time.tv_usec);
 }
 
+/**
+Function: estimateNewRTT
+
+Purpose: Function to estimate the new RTT using SRTT equations. This SRTT is used to
+    approximate the timeout length. 
+
+Parameters:
+    packet -- The packet who's time of flight is being used to calculate the new SRTT.
+*/
 void estimateNewRTT(packet_t *packet) {
-    // PRINT(("Entering estimateNewRTT...\n"));
     struct timeval now;
     gettimeofday(&now, NULL);
 
     timersub(&now, &packet->send_time, &RTT);
     RTT.tv_usec *= 2;
-    // PRINT(("RTT = %ld s and %06ld microseconds\n", RTT.tv_sec, RTT.tv_usec));
 
     long long unsigned int SRTT_ms = getMicrotime(SRTT.it_value);
     long long unsigned int RTT_ms = getMicrotime(RTT);
 
     double new_SRTT_ms = (alpha * (double)SRTT_ms) + ((1 - alpha) * (double)RTT_ms);
-    // printf("Time: %f\n", new_SRTT_ms);
 
     SRTT.it_value.tv_sec = (new_SRTT_ms / (int)1e6);
     SRTT.it_value.tv_usec = ((int)new_SRTT_ms % (int)1e6);
@@ -253,75 +279,56 @@ void estimateNewRTT(packet_t *packet) {
     SRTT_sleep.it_value.tv_sec = SRTT.it_value.tv_sec;
     SRTT_sleep.it_value.tv_usec = (SRTT.it_value.tv_usec) * 2;
 
-    // PRINT(("SRTT = %ld s and %06ld microseconds\n", SRTT.it_value.tv_sec, SRTT.it_value.tv_usec));
-    // PRINT(("SRTT_sleep = %ld s and %06ld microseconds\n", SRTT_sleep.it_value.tv_sec, SRTT_sleep.it_value.tv_usec));
-
     if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &SRTT_sleep.it_value, sizeof(SRTT_sleep.it_value)) < 0) {
         perror("setsockopt");
     }
-
-    // PRINT(("Leaving estimateNewRTT\n"));
 }
 
-/*
- * Given an ack number, mark the packet as inactive in the window list
- */
+/**
+Function: markPacketAsInactive
+
+Purpose: Given an ack number, mark all packets up to that ack as inactive in the window list.
+
+Parameters:
+    cum_ack -- Acknowledgement number up till which everything should be marked inactive.
+*/
 void markPacketAsInactive(int cum_ack) {
-
-    // printPacketList();
-
-    // PRINT(("Removing packet %d!\n", cum_ack));
-
-    // Delete everything in the linked list up until (and including) cum_ack
-    // Essentially, delete head until seq_num >= cum_ack
-    /////////////////
-
-    // (head->seq_num <= cum_ack && (head->seq_num < (cum_ack - SWS)) || )
-
-
-
-    // head + SWS > cum_ack
-
-    // PRINT(("Entering markPacketAsInactive\n"));
 	packet_t *next;
     while (head && ((head->seq_num <= cum_ack && (head->seq_num + SWS) > cum_ack) || (head->seq_num - SWS) > cum_ack))
 	{
         if (head->seq_num == cum_ack)
             estimateNewRTT(head);
-
-		// PRINT(("Removing packet %d\n", head->seq_num));
-		next = head->next;
+		
+        next = head->next;
         free(head->data);
         free(head);
         head = next;
-        // PRINT(("markPacketAsInactive:\n"));
-        // printPacketList();
-        // PRINT(("====================\n"));
+
         if(head)
         {
         	head->prev = NULL;
         }
-		// PRINT(("enter\n"));
 		LAR = (LAR + 1) % NUM_SEQ_NUM;
 	}
-    // PRINT(("After the while loop\n"));
 
     if (!head)
         tail = NULL;
 
 	LAR = cum_ack;
-
-    // PRINT(("After removing...\n=========\n"));
-    // printPacketList();
-    // PRINT(("=========\n"));
 }
 
-/*
- * Thread for receiving acknowledgements, wakes up the sleeping transfer thread
- */
+/**
+Function: receiveAcknowledgements
+
+Purpose: Thread for receiving acknowledgements and waking up the sleeping transfer thread.
+
+Parameters:
+     ptr -- UDP Port and address information from which acknowledgements are received.
+
+Returns: Null for success.
+*/
 void *receiveAcknowledgements(void *ptr) {
 	thread_arg_t *arg = ptr;
-	// unsigned short int udpPort = arg->udpPort;
 	struct addrinfo *p = arg->p;
 
 	while (1) {
@@ -343,35 +350,22 @@ void *receiveAcknowledgements(void *ptr) {
             char cum_ack;
     	    char last_seq_recv;
 
-            // PRINT(("Buf = %s\n", buf));
-            // PRINT(("Buf len = %zu\n", strlen(buf)));
             bool first = true;
             while (token != NULL) {
                 strsep(&end, ".");
 
-                // PRINT(("token = %s\n", token));
-                // PRINT(("token atoi = %d\n", atoi(token)));
-
                 if (first) {
-                    // memcpy(&cum_ack, token, strlen(token));
                     cum_ack = (char)atoi(token);
                     first = false;
                 }
                 else
                     last_seq_recv = (char)atoi(token);
-                    // memcpy(&last_seq_recv, token, strlen(token));
 
                 token = end;
             }
-            // PRINT(("Check test ack %d.%d\n", cum_ack, last_seq_recv));
-
-    	    // cum_ack -= 48;
-         //    last_seq_recv -= 48;
-    	    //PRINT(("next: %d, LAR: %d\n", cum_ack, LAR));
             pthread_mutex_lock(&m_packets);
 
             // If the cumulative ack is in the window
-            // DON'T MOD THE LAR + 4 BECAUSE LAR = 6 AND CUM_ACK = 7 BREAKS IT
     	    if ((cum_ack >= (LAR + 1) && (LAR + SWS >= cum_ack)) || cum_ack <= (LAR - SWS)) {
     	    	PRINT(("1 Received ack %d.%d\n", cum_ack, last_seq_recv));
     	    	markPacketAsInactive(cum_ack);
@@ -383,7 +377,6 @@ void *receiveAcknowledgements(void *ptr) {
     	    else if (last_seq_recv > cum_ack || last_seq_recv <= (cum_ack + SWS) % NUM_SEQ_NUM)
     	    {
     	    	PRINT(("2 Received ack %d.%d\n", cum_ack, last_seq_recv));
-    	    	// printPacketList();
     	    	packet_t *temp = head;
     	    	while (temp && temp->seq_num != last_seq_recv)
     			{
@@ -401,7 +394,6 @@ void *receiveAcknowledgements(void *ptr) {
     					temp->next->prev = temp->prev;
     				}
     				estimateNewRTT(temp);
-                    // printPacketList();
 
                     if (temp == head)
                         head = temp->next;
@@ -432,15 +424,17 @@ void *receiveAcknowledgements(void *ptr) {
 	return NULL;
 }
 
-// while seq_num < LAR + SWS && bytesToTransfer > 0: <-- mod this
-// if bytesToTransfer > 1471:
-// 	read in 1471 bytes for message
-// 	bytesToTransfer -= 1471
-// else
-// 	read in bytesToTransfer
-// add seq_num to start of message
-// increment seq_num (w/ mod)
-// send
+/**
+Function: reliablyTransfer
+
+Purpose: Thread to read in data from input file and trasfer data to receiver. A sequence number is assigned to 
+    each packet and the data is inserted into the linked list until an ack for it is received.
+
+Parameters:
+     filename -- Name of the file from which data is being transfered.
+     bytesToTransfer -- The total number of bytes to be transmitted from the file.
+     p -- The UDP Port and Address Information for the receiver. 
+*/
 void reliablyTransfer(char* filename, unsigned long long int bytesToTransfer, struct addrinfo *p) {
 	FILE *f = fopen(filename, "rb");
 
@@ -456,30 +450,22 @@ void reliablyTransfer(char* filename, unsigned long long int bytesToTransfer, st
 
 	while (bytesToTransfer > 0 || head || tail) {
 
-		// PRINT(("Any packets to send?\n"));
-		// PRINT(("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS));
-		// printPacketList();
-
 		while (( (seq_num > LAR && seq_num <= (LAR + SWS))  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
 			char buf[MAX_PACKET_SIZE];
 			char *ptr = buf + 1;
 			size_t bytesRead;
 			if (bytesToTransfer > MAX_DATA_SIZE) {
 				bytesRead = fread(ptr, 1, MAX_DATA_SIZE, f);
-				//PRINT(("1: %i\n", fileNotFinished));
-				//bytesRead = MAX_DATA_SIZE;
 				bytesToTransfer -= MAX_DATA_SIZE;
 			}
 			else {
 				bytesRead = fread(ptr, 1, bytesToTransfer, f);
-				//PRINT(("2: %i\n", fileNotFinished));
-				//bytesRead = bytesToTransfer;
 				bytesToTransfer = 0;
 			}
 
 			memcpy(buf, &seq_num, 1);
 
-			// Update the window linked list
+			// Update the linked list with the latest packet.
 			insert_data(buf, id, seq_num, bytesRead+1);
 
 			PRINT(("Sending out packet (%d)\n", seq_num));
@@ -490,32 +476,13 @@ void reliablyTransfer(char* filename, unsigned long long int bytesToTransfer, st
 		        exit(1);
 		    }
 
-		    // if(seq_num == 0)
-		    // {
-		    // 	seq_num = 1;
-		    // }
-		    // else if(seq_num == 2)
-		    // {
-		    // 	seq_num = 0;
-		    // }
-		    // else if(seq_num == 1)
-		    // {
-		    // 	seq_num = 2;
-		    // }
 		    setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
-
 			seq_num = (seq_num + 1) % NUM_SEQ_NUM;
-
 			id += 1;
-			//PRINT(("bytes: %i\n", bytesToTransfer));
 		}
-		//PRINT(("seq_num = %d, LAR = %d, SWS = %d\n", seq_num, LAR, SWS));
-
-		// Conditional wait here until an ACK is received, or something timesOut
+		// Conditional wait here until an ACK is received, or something times out.
         while (!send_check) {
-            // PRINT(("rT: Sleeping with %lld to send...\n", bytesToTransfer));
             pthread_cond_wait(&cv, &m);
-            // PRINT(("rT: Woken up!...\n"));
         }
         send_check = false;
 	}
@@ -524,6 +491,18 @@ void reliablyTransfer(char* filename, unsigned long long int bytesToTransfer, st
 	fclose(f);
 }
 
+/**
+Function: main
+
+Purpose: Main thread to initialize relevant variables and start transmitting data and receiving 
+    acknowledgements. 
+
+Parameters:
+    argc -- Number of arguments passed into the program.
+    argv -- List of arguments that are passed in. 
+
+Returns: 0 for successful completion. Anything else for errors.
+*/
 int main(int argc, char** argv)
 {
     if(argc != 5) {
@@ -531,14 +510,11 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 	signal(SIGINT, SIGINT_handler);
-	// signal(SIGALRM, awakenTimeoutThread);
 
 	char *hostname = argv[1];
 	char *portNum  = argv[2];
 	char *filename = argv[3];
-	// PRINT(("hostname = %s; portnum = %s\n", hostname, portNum));
 
-	// lol fuck that idk
 	struct addrinfo hints, *servinfo, *p;
 	int rv;
 	int numbytes;
@@ -552,7 +528,7 @@ int main(int argc, char** argv)
 		return 1;
 	}
 
-	// loop through all the results and make a socket
+	// Loop through all the results and make a socket.
 	for (p = servinfo; p != NULL; p = p->ai_next) {
 		if ((sockfd = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1) {
 			perror("talker: socket");
@@ -577,46 +553,43 @@ int main(int argc, char** argv)
 		exit(1);
 	}
 
-	// // Create thread for waiting and timeouts
+	// Create thread for waiting and timeouts
 	pthread_t timeout_id;
     if (pthread_create(&timeout_id, NULL, checkForTimeouts, &arg) != 0) {
         perror("pthread_create");
         exit(1);
     }
 
-    // Initialize SRTT(0) to 1 second
+    // Initialize SRTT(0) to 1 second.
     SRTT.it_value.tv_sec = 1;
     SRTT.it_value.tv_usec = 0;
     SRTT.it_interval.tv_sec = 0;
     SRTT.it_interval.tv_usec = 0;
-    // Initialize RTT(0) = 0.5 second
+    // Initialize RTT(0) = 0.5 second.
     RTT = (struct timeval){0};
     RTT.tv_usec = 50000;
-    // Create signal handler
+
+    // Create signal handler.
     memset(&sa, 0, sizeof(sa));
     sa.sa_handler = &awakenTimeoutThread;
     sigaction(SIGALRM, &sa, NULL);
 
 	reliablyTransfer(filename, numBytes, p);
 
-    // printPacketList();
-
-    // Wait for the linked list to empty before sending finished packet
+    // Wait for the linked list to empty before sending finished packet.
     pthread_mutex_lock(&m);
     while (head || tail) {
         pthread_cond_wait(&cv, &m);
-        // PRINT(("I'm DONE WAITING\n"));
     }
     pthread_mutex_unlock(&m);
 
     PRINT(("Sending FINISHED\n"));
 
-	// Done sending shit out, let the receiver know to stop
+	// Done sending file data out, let the receiver know to stop.
 	char val = -1;
     char buf[2];
     buf[0] = val;
     buf[1] = val;
-    // char *buf = "FF";
     insert_data(buf, 0, 0, 2);
     if ((numbytes = sendto(sockfd, buf, 2, 0, p->ai_addr, p->ai_addrlen)) == -1) {
         perror("SEND :(\n");
@@ -632,27 +605,3 @@ int main(int argc, char** argv)
 
     return 0;
 }
-
-/**
-receive_thread
-while True:
-	listen for message from receiver
-	LAR = ack_val
-	broadcast to wake up conditional variable
-
-send_thread
-while seq_num < LAR + SWS && bytesToTransfer > 0: <-- mod this
-	if bytesToTransfer > 1471:
-		read in 1471 bytes for message
-		bytesToTransfer -= 1471
-	else
-		read in bytesToTransfer
-	add seq_num to start of message
-	increment seq_num (w/ mod)
-	send
-
-wait_thread:
-conditionally wait 100ms
-	restart send_thread
-if woken up, restart conditionally wait
-**/
