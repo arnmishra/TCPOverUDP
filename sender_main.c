@@ -65,7 +65,7 @@ typedef struct packet {
 packet_t *head;
 packet_t *tail;
 
-// Argument for the pthread function receiveAcknowledgements
+// Argument for the pthread function receive_acknowledgments
 typedef struct thread_arg {
 	unsigned short int udpPort;
 	struct addrinfo *p;
@@ -95,11 +95,11 @@ void SIGINT_handler() {
 }
 
 /**
-Function: awakenTimeoutThread
+Function: awaken_timeout_thread
 
 Purpose: Function to signal the timeout thread to wake it up and resend relevant packets.
 */
-void awakenTimeoutThread() {
+void awaken_timeout_thread() {
     pthread_mutex_lock(&m_timeout);
     timeout_check = true;
     pthread_cond_signal(&cv_timeout);
@@ -107,14 +107,14 @@ void awakenTimeoutThread() {
 }
 
 /**
-Function: checkForTimeouts
+Function: check_for_timeouts
 
 Purpose: Check for timeouts in the linked list to resend relevant packets.
 
 Parameters:
     ptr -- UDP Port and address information of what receiver to resend data to. 
 */
-void *checkForTimeouts(void *ptr) {
+void *check_for_timeouts(void *ptr) {
 	thread_arg_t *arg = ptr;
 	struct addrinfo *p = arg->p;
 
@@ -239,7 +239,7 @@ void insert_data(char *buf, int packet_id, int sequence_num, ssize_t byte_count)
 }
 
 /**
-Function: getMicrotime
+Function: get_microtime
 
 Purpose: Function to get the current time in microseconds.
 
@@ -248,12 +248,12 @@ Parameters:
 
 Returns: Time in microseconds. 
 */
-long long unsigned int getMicrotime(struct timeval time){
+long long unsigned int get_microtime(struct timeval time){
     return (time.tv_sec * (long long unsigned int)1000000) + (time.tv_usec);
 }
 
 /**
-Function: estimateNewRTT
+Function: estimate_new_RTT
 
 Purpose: Function to estimate the new RTT using SRTT equations. This SRTT is used to
     approximate the timeout length. 
@@ -261,15 +261,15 @@ Purpose: Function to estimate the new RTT using SRTT equations. This SRTT is use
 Parameters:
     packet -- The packet who's time of flight is being used to calculate the new SRTT.
 */
-void estimateNewRTT(packet_t *packet) {
+void estimate_new_RTT(packet_t *packet) {
     struct timeval now;
     gettimeofday(&now, NULL);
 
     timersub(&now, &packet->send_time, &RTT);
     RTT.tv_usec *= 2;
 
-    long long unsigned int SRTT_ms = getMicrotime(SRTT.it_value);
-    long long unsigned int RTT_ms = getMicrotime(RTT);
+    long long unsigned int SRTT_ms = get_microtime(SRTT.it_value);
+    long long unsigned int RTT_ms = get_microtime(RTT);
 
     double new_SRTT_ms = (alpha * (double)SRTT_ms) + ((1 - alpha) * (double)RTT_ms);
 
@@ -285,19 +285,19 @@ void estimateNewRTT(packet_t *packet) {
 }
 
 /**
-Function: markPacketAsInactive
+Function: mark_packet_as_inactive
 
 Purpose: Given an ack number, mark all packets up to that ack as inactive in the window list.
 
 Parameters:
     cum_ack -- Acknowledgement number up till which everything should be marked inactive.
 */
-void markPacketAsInactive(int cum_ack) {
+void mark_packet_as_inactive(int cum_ack) {
 	packet_t *next;
     while (head && ((head->seq_num <= cum_ack && (head->seq_num + SWS) > cum_ack) || (head->seq_num - SWS) > cum_ack))
 	{
         if (head->seq_num == cum_ack)
-            estimateNewRTT(head);
+            estimate_new_RTT(head);
 		
         next = head->next;
         free(head->data);
@@ -318,7 +318,7 @@ void markPacketAsInactive(int cum_ack) {
 }
 
 /**
-Function: receiveAcknowledgements
+Function: receive_acknowledgments
 
 Purpose: Thread for receiving acknowledgements and waking up the sleeping transfer thread.
 
@@ -327,7 +327,7 @@ Parameters:
 
 Returns: Null for success.
 */
-void *receiveAcknowledgements(void *ptr) {
+void *receive_acknowledgments(void *ptr) {
 	thread_arg_t *arg = ptr;
 	struct addrinfo *p = arg->p;
 
@@ -338,6 +338,7 @@ void *receiveAcknowledgements(void *ptr) {
         if (byte_count > 0) {
             buf[byte_count] = '\0';
 
+            // If received the final ACK
             if (buf[0] == 'F' && buf[1] == 'F') {
                 PRINT(("RECEIVED ACKNOWLEDGEMENT...\n"));
                 PRINT(("ENDING PROGRAM...\n"));
@@ -350,6 +351,7 @@ void *receiveAcknowledgements(void *ptr) {
             char cum_ack;
     	    char last_seq_recv;
 
+            // Parse the ACK to get cum_ack and last_seq_recv
             bool first = true;
             while (token != NULL) {
                 strsep(&end, ".");
@@ -368,7 +370,7 @@ void *receiveAcknowledgements(void *ptr) {
             // If the cumulative ack is in the window
     	    if ((cum_ack >= (LAR + 1) && (LAR + SWS >= cum_ack)) || cum_ack <= (LAR - SWS)) {
     	    	PRINT(("1 Received ack %d.%d\n", cum_ack, last_seq_recv));
-    	    	markPacketAsInactive(cum_ack);
+    	    	mark_packet_as_inactive(cum_ack);
                 send_check = true;
                 pthread_cond_broadcast(&cv);
                 setitimer(ITIMER_REAL, &SRTT_sleep, NULL);
@@ -384,7 +386,7 @@ void *receiveAcknowledgements(void *ptr) {
     			}
     			if(temp)
     			{
-    				PRINT(("receiveAcknowledgements: Removing packet %d\n", temp->seq_num));
+    				PRINT(("receive_acknowledgments: Removing packet %d\n", temp->seq_num));
     				if(temp->prev)
     				{
     					temp->prev->next = temp->next;
@@ -393,7 +395,7 @@ void *receiveAcknowledgements(void *ptr) {
     				{
     					temp->next->prev = temp->prev;
     				}
-    				estimateNewRTT(temp);
+    				estimate_new_RTT(temp);
 
                     if (temp == head)
                         head = temp->next;
@@ -414,7 +416,7 @@ void *receiveAcknowledgements(void *ptr) {
             pthread_mutex_unlock(&m_packets);
         }
         else {
-            awakenTimeoutThread();
+            awaken_timeout_thread();
         }
 
 	}
@@ -425,17 +427,17 @@ void *receiveAcknowledgements(void *ptr) {
 }
 
 /**
-Function: reliablyTransfer
+Function: reliably_transfer
 
 Purpose: Thread to read in data from input file and trasfer data to receiver. A sequence number is assigned to 
     each packet and the data is inserted into the linked list until an ack for it is received.
 
 Parameters:
      filename -- Name of the file from which data is being transfered.
-     bytesToTransfer -- The total number of bytes to be transmitted from the file.
+     bytes_to_transfer -- The total number of bytes to be transmitted from the file.
      p -- The UDP Port and Address Information for the receiver. 
 */
-void reliablyTransfer(char* filename, unsigned long long int bytesToTransfer, struct addrinfo *p) {
+void reliably_transfer(char* filename, unsigned long long int bytes_to_transfer, struct addrinfo *p) {
 	FILE *f = fopen(filename, "rb");
 
 	if (f == NULL) {
@@ -448,19 +450,19 @@ void reliablyTransfer(char* filename, unsigned long long int bytesToTransfer, st
 
     char seq_num = 0;
 
-	while (bytesToTransfer > 0 || head || tail) {
+	while (bytes_to_transfer > 0 || head || tail) {
 
-		while (( (seq_num > LAR && seq_num <= (LAR + SWS))  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytesToTransfer > 0) {
+		while (( (seq_num > LAR && seq_num <= (LAR + SWS))  || (seq_num < LAR && LAR + SWS >= NUM_SEQ_NUM && seq_num <= (LAR + SWS) % NUM_SEQ_NUM)) && bytes_to_transfer > 0) {
 			char buf[MAX_PACKET_SIZE];
 			char *ptr = buf + 1;
 			size_t bytesRead;
-			if (bytesToTransfer > MAX_DATA_SIZE) {
+			if (bytes_to_transfer > MAX_DATA_SIZE) {
 				bytesRead = fread(ptr, 1, MAX_DATA_SIZE, f);
-				bytesToTransfer -= MAX_DATA_SIZE;
+				bytes_to_transfer -= MAX_DATA_SIZE;
 			}
 			else {
-				bytesRead = fread(ptr, 1, bytesToTransfer, f);
-				bytesToTransfer = 0;
+				bytesRead = fread(ptr, 1, bytes_to_transfer, f);
+				bytes_to_transfer = 0;
 			}
 
 			memcpy(buf, &seq_num, 1);
@@ -548,14 +550,14 @@ int main(int argc, char** argv)
 	// Create thread for receiving ACKs
 	thread_arg_t arg = { .udpPort = udpPort, .p = p };
 	pthread_t ack_id;
-	if (pthread_create(&ack_id, NULL, receiveAcknowledgements, &arg) != 0) {
+	if (pthread_create(&ack_id, NULL, receive_acknowledgments, &arg) != 0) {
 		perror("pthread_create");
 		exit(1);
 	}
 
 	// Create thread for waiting and timeouts
 	pthread_t timeout_id;
-    if (pthread_create(&timeout_id, NULL, checkForTimeouts, &arg) != 0) {
+    if (pthread_create(&timeout_id, NULL, check_for_timeouts, &arg) != 0) {
         perror("pthread_create");
         exit(1);
     }
@@ -571,10 +573,10 @@ int main(int argc, char** argv)
 
     // Create signal handler.
     memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = &awakenTimeoutThread;
+    sa.sa_handler = &awaken_timeout_thread;
     sigaction(SIGALRM, &sa, NULL);
 
-	reliablyTransfer(filename, numBytes, p);
+	reliably_transfer(filename, numBytes, p);
 
     // Wait for the linked list to empty before sending finished packet.
     pthread_mutex_lock(&m);
